@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Habib University File Manager - Simplified Version
+Habib University CLO/PLO Mapping UI - Simplified Version
 A basic PyQt6 application for file management and processing.
 """
 
@@ -73,7 +73,7 @@ class HabibUniversityApp(QMainWindow):
     
     def init_ui(self):
         """Initialize the user interface."""
-        self.setWindowTitle("Habib University - File Manager")
+        self.setWindowTitle("Habib University - CLO/PLO Mapping")
         self.setMinimumSize(500, 350)
         self.resize(600, 450)
         
