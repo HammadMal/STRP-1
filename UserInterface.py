@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Habib University File Manager Application
-A PyQt6-based desktop application for file management and processing.
+Habib University File Manager - Simplified Version
+A basic PyQt6 application for file management and processing.
 """
 
 import sys
@@ -12,16 +12,13 @@ import pandas as pd
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QTextEdit, QFrame, QMessageBox,
-    QProgressBar, QGroupBox, QGridLayout, QSizePolicy
+    QPushButton, QLabel, QFileDialog, QMessageBox, QProgressBar
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
-from PyQt6.QtGui import QFont, QPixmap, QPalette, QColor, QIcon
-from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 
 class FileProcessor(QThread):
-    """Background thread for processing files without blocking the UI."""
+    """Background thread for processing files."""
     
     finished = pyqtSignal(bool, str)  # success, message
     progress = pyqtSignal(int)  # progress percentage
@@ -35,13 +32,11 @@ class FileProcessor(QThread):
         try:
             self.progress.emit(25)
             
-            # Simulate file processing
-            self.msleep(500)  # Small delay for demo
-            
             file_ext = Path(self.file_path).suffix.lower()
             
             self.progress.emit(50)
             
+            # Load file based on extension
             if file_ext == '.csv':
                 df = pd.read_csv(self.file_path)
             elif file_ext in ['.xlsx', '.xls']:
@@ -67,371 +62,130 @@ class FileProcessor(QThread):
             self.finished.emit(False, f"Error processing file: {str(e)}")
 
 
-class ModernButton(QPushButton):
-    """Custom styled button with modern appearance."""
-    
-    def __init__(self, text: str, primary: bool = False):
-        super().__init__(text)
-        self.setMinimumHeight(40)
-        self.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
-        
-        if primary:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #6B2C91;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    padding: 8px 16px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #5A2478;
-                }
-                QPushButton:pressed {
-                    background-color: #4A1D63;
-                }
-                QPushButton:disabled {
-                    background-color: #CCCCCC;
-                    color: #666666;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: white;
-                    color: #333333;
-                    border: 2px solid #DDDDDD;
-                    border-radius: 8px;
-                    padding: 8px 16px;
-                }
-                QPushButton:hover {
-                    border-color: #6B2C91;
-                    background-color: #F8F9FA;
-                }
-                QPushButton:pressed {
-                    background-color: #E9ECEF;
-                }
-            """)
-
-
-class StatusLabel(QLabel):
-    """Custom styled status label."""
-    
-    def __init__(self, text: str = ""):
-        super().__init__(text)
-        self.setFont(QFont("Segoe UI", 9))
-        self.setWordWrap(True)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumHeight(60)
-        self.set_neutral()
-    
-    def set_success(self, message: str):
-        self.setText(message)
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #D4EDDA;
-                color: #155724;
-                border: 1px solid #C3E6CB;
-                border-radius: 6px;
-                padding: 12px;
-            }
-        """)
-    
-    def set_error(self, message: str):
-        self.setText(message)
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #F8D7DA;
-                color: #721C24;
-                border: 1px solid #F5C6CB;
-                border-radius: 6px;
-                padding: 12px;
-            }
-        """)
-    
-    def set_neutral(self):
-        self.setText("No file selected")
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #F8F9FA;
-                color: #6C757D;
-                border: 1px solid #DEE2E6;
-                border-radius: 6px;
-                padding: 12px;
-            }
-        """)
-
-
 class HabibUniversityApp(QMainWindow):
-    """Main application window for Habib University File Manager."""
+    """Main application window."""
     
     def __init__(self):
         super().__init__()
         self.current_file_path: Optional[str] = None
         self.file_processor: Optional[FileProcessor] = None
-        self.logo_pixmap: Optional[QPixmap] = None
-        
-        self.load_logo()
         self.init_ui()
-        self.setup_connections()
     
     def init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle("Habib University - File Manager")
-        self.setMinimumSize(600, 500)
-        self.resize(800, 600)
+        self.setMinimumSize(500, 350)
+        self.resize(600, 450)
         
-        # Set application icon (you can add an icon file later)
-        # self.setWindowIcon(QIcon("habib_logo.png"))
-        
-        # Create central widget and main layout
+        # Create central widget
         central_widget = QWidget()
+        central_widget.setStyleSheet("background-color: #FFFFFF;")
         self.setCentralWidget(central_widget)
         
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(30, 30, 30, 30)
+        # Main layout
+        layout = QVBoxLayout(central_widget)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
         
-        # Header section
-        self.create_header(main_layout)
+        # Title
+        title = QLabel("Habib University File Manager")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(title)
         
-        # File upload section
-        self.create_file_section(main_layout)
+        # File selection section
+        file_layout = QHBoxLayout()
         
-        # Status section
-        self.create_status_section(main_layout)
+        self.file_label = QLabel("No file selected")
+        self.file_label.setStyleSheet("padding: 8px; border: 1px solid #ccc; background: #f9f9f9;")
         
-        # Progress section
-        self.create_progress_section(main_layout)
-        
-        # Add stretch to push everything to top
-        main_layout.addStretch()
-        
-        # Apply modern styling
-        self.apply_styling()
-    
-    def load_logo(self):
-        """Load the Habib University logo."""
-        try:
-            # Try to load logo from assets folder
-            logo_path = os.path.join("assets", "habib_logo.png")
-            if os.path.exists(logo_path):
-                self.logo_pixmap = QPixmap(logo_path)
-            else:
-                # Try alternative common logo file names
-                possible_names = [
-                    "habib_university_logo.png",
-                    "habib_logo.jpg", 
-                    "habib_logo.jpeg",
-                    "logo.png",
-                    "logo.jpg"
-                ]
-                
-                for name in possible_names:
-                    alt_path = os.path.join("assets", name)
-                    if os.path.exists(alt_path):
-                        self.logo_pixmap = QPixmap(alt_path)
-                        break
-                        
-            # If logo loaded successfully, verify it's not null
-            if self.logo_pixmap and self.logo_pixmap.isNull():
-                print("Warning: Logo file found but could not be loaded properly")
-                self.logo_pixmap = None
-                
-        except Exception as e:
-            print(f"Error loading logo: {e}")
-            self.logo_pixmap = None
-    
-    def create_header(self, parent_layout):
-        """Create the header section with university branding."""
-        header_frame = QFrame()
-        header_frame.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #6B2C91, stop:1 #8E44AD);
-                border-radius: 12px;
-                padding: 20px;
-            }
-        """)
-        
-        header_layout = QVBoxLayout(header_frame)
-        
-        # Logo and title container
-        title_container = QHBoxLayout()
-        
-        # Logo (placeholder for now - you can add the actual logo file later)
-        logo_label = QLabel()
-        if self.logo_pixmap and not self.logo_pixmap.isNull():
-            scaled_logo = self.logo_pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(scaled_logo)
-        else:
-            # Placeholder logo text
-            logo_label.setText("🦁")
-            logo_label.setFont(QFont("Segoe UI", 48))
-            logo_label.setStyleSheet("color: #F4E4BC;")
-        
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_label.setMaximumSize(100, 100)
-        
-        # Title section
-        title_section = QVBoxLayout()
-        
-        # University name
-        title_label = QLabel("Habib University")
-        title_label.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: white; margin: 0px;")
-        
-        # Subtitle
-        subtitle_label = QLabel("File Management System")
-        subtitle_label.setFont(QFont("Segoe UI", 12))
-        subtitle_label.setStyleSheet("color: #E8D5F2; margin: 0px;")
-        
-        title_section.addWidget(title_label)
-        title_section.addWidget(subtitle_label)
-        title_section.addStretch()
-        
-        # Add to container
-        title_container.addWidget(logo_label)
-        title_container.addSpacing(20)
-        title_container.addLayout(title_section, 1)
-        
-        header_layout.addLayout(title_container)
-        
-        parent_layout.addWidget(header_frame)
-    
-    def create_file_section(self, parent_layout):
-        """Create the file upload section."""
-        file_group = QGroupBox("File Upload")
-        file_group.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
-        file_group.setStyleSheet("""
-            QGroupBox {
+        self.browse_btn = QPushButton("Browse Files")
+        self.browse_btn.clicked.connect(self.browse_file)
+        self.browse_btn.setMinimumWidth(120)
+        self.browse_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B2C91;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
                 font-weight: bold;
-                border: 2px solid #D1C4E9;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: #FAFAFA;
+                min-height: 25px;
             }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px 0 8px;
-                background-color: white;
-                color: #6B2C91;
+            QPushButton:hover {
+                background-color: #5A2478;
             }
-        """)
-        
-        file_layout = QVBoxLayout(file_group)
-        file_layout.setSpacing(15)
-        
-        # File selection area
-        file_selection_layout = QHBoxLayout()
-        
-        self.file_path_label = QLabel("No file selected")
-        self.file_path_label.setFont(QFont("Segoe UI", 10))
-        self.file_path_label.setStyleSheet("""
-            QLabel {
-                background-color: #F8F9FA;
-                border: 1px solid #DEE2E6;
-                border-radius: 6px;
-                padding: 10px;
-                color: #6C757D;
+            QPushButton:pressed {
+                background-color: #4A1D63;
+            }
+            QPushButton:disabled {
+                background-color: #CCCCCC;
+                color: #666666;
             }
         """)
         
-        self.browse_button = ModernButton("Browse Files", primary=True)
-        self.browse_button.setMaximumWidth(150)
-        
-        file_selection_layout.addWidget(self.file_path_label, 1)
-        file_selection_layout.addWidget(self.browse_button)
+        file_layout.addWidget(self.file_label, 1)
+        file_layout.addWidget(self.browse_btn)
+        layout.addLayout(file_layout)
         
         # Supported formats info
-        info_label = QLabel("Supported formats: Excel (.xlsx, .xls) and CSV (.csv)")
-        info_label.setFont(QFont("Segoe UI", 9))
-        info_label.setStyleSheet("color: #6C757D; margin-top: 5px;")
+        info = QLabel("Supported: Excel (.xlsx, .xls) and CSV (.csv)")
+        info.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(info)
         
-        file_layout.addLayout(file_selection_layout)
-        file_layout.addWidget(info_label)
-        
-        parent_layout.addWidget(file_group)
-    
-    def create_status_section(self, parent_layout):
-        """Create the status display section."""
-        status_group = QGroupBox("Status")
-        status_group.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
-        status_group.setStyleSheet("""
-            QGroupBox {
+        # Process files button
+        self.process_btn = QPushButton("Process Files")
+        self.process_btn.clicked.connect(self.process_files)
+        self.process_btn.setEnabled(False)  # Disabled until file is selected
+        self.process_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B2C91;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 16px;
                 font-weight: bold;
-                border: 2px solid #D1C4E9;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: #FAFAFA;
+                min-height: 30px;
+                font-size: 14px;
             }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px 0 8px;
-                background-color: white;
-                color: #6B2C91;
+            QPushButton:hover {
+                background-color: #5A2478;
+            }
+            QPushButton:pressed {
+                background-color: #4A1D63;
+            }
+            QPushButton:disabled {
+                background-color: #CCCCCC;
+                color: #666666;
             }
         """)
+        layout.addWidget(self.process_btn)
         
-        status_layout = QVBoxLayout(status_group)
+        # Status label
+        self.status_label = QLabel("Ready")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ddd; background: #f5f5f5;")
+        layout.addWidget(self.status_label)
         
-        self.status_label = StatusLabel()
-        status_layout.addWidget(self.status_label)
-        
-        parent_layout.addWidget(status_group)
-    
-    def create_progress_section(self, parent_layout):
-        """Create the progress bar section."""
+        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #DDDDDD;
-                border-radius: 6px;
-                text-align: center;
-                font-weight: bold;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #6B2C91, stop:1 #8E44AD);
-                border-radius: 5px;
-            }
-        """)
+        layout.addWidget(self.progress_bar)
         
-        parent_layout.addWidget(self.progress_bar)
-    
-    def apply_styling(self):
-        """Apply overall application styling."""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #FFFFFF;
-            }
-            QWidget {
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-        """)
-    
-    def setup_connections(self):
-        """Setup signal-slot connections."""
-        self.browse_button.clicked.connect(self.browse_file)
+        # Add stretch to center content
+        layout.addStretch()
     
     def browse_file(self):
         """Open file dialog to select a file."""
-        file_dialog = QFileDialog(self)
-        file_dialog.setNameFilter("Spreadsheet files (*.xlsx *.xls *.csv);;All files (*.*)")
-        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-        file_dialog.setWindowTitle("Select File - Habib University")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select File - Habib University",
+            "",
+            "Spreadsheet files (*.xlsx *.xls *.csv);;All files (*.*)"
+        )
         
-        if file_dialog.exec():
-            selected_files = file_dialog.selectedFiles()
-            if selected_files:
-                self.load_file(selected_files[0])
+        if file_path:
+            self.load_file(file_path)
     
     def load_file(self, file_path: str):
         """Load and process the selected file."""
@@ -439,36 +193,19 @@ class HabibUniversityApp(QMainWindow):
         file_name = Path(file_path).name
         
         # Update UI
-        self.file_path_label.setText(f"Selected: {file_name}")
-        self.file_path_label.setStyleSheet("""
-            QLabel {
-                background-color: #F3E5F5;
-                border: 1px solid #CE93D8;
-                border-radius: 6px;
-                padding: 10px;
-                color: #6B2C91;
-            }
-        """)
-        
+        self.file_label.setText(f"Selected: {file_name}")
         self.status_label.setText("Processing file...")
-        self.status_label.setStyleSheet("""
-            QLabel {
-                background-color: #FFF3CD;
-                color: #856404;
-                border: 1px solid #FFEAA7;
-                border-radius: 6px;
-                padding: 12px;
-            }
-        """)
+        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ffc107; background: #fff3cd; color: #856404;")
         
         # Show progress bar
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
-        # Disable browse button during processing
-        self.browse_button.setEnabled(False)
+        # Disable buttons
+        self.browse_btn.setEnabled(False)
+        self.process_btn.setEnabled(False)
         
-        # Start file processing in background thread
+        # Start processing
         self.file_processor = FileProcessor(file_path)
         self.file_processor.finished.connect(self.on_file_processed)
         self.file_processor.progress.connect(self.progress_bar.setValue)
@@ -480,21 +217,50 @@ class HabibUniversityApp(QMainWindow):
         self.progress_bar.setVisible(False)
         
         # Re-enable browse button
-        self.browse_button.setEnabled(True)
+        self.browse_btn.setEnabled(True)
         
         # Update status
         if success:
-            self.status_label.set_success(message)
+            self.status_label.setText(message)
+            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #28a745; background: #d4edda; color: #155724;")
+            # Enable process button after successful file load
+            self.process_btn.setEnabled(True)
         else:
-            self.status_label.set_error(message)
+            self.status_label.setText(f"Error: {message}")
+            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
+            # Keep process button disabled on error
+            self.process_btn.setEnabled(False)
         
-        # Clean up thread
+        # Clean up
         if self.file_processor:
             self.file_processor.deleteLater()
             self.file_processor = None
     
+    def process_files(self):
+        """Process the loaded file with external script."""
+        if not self.current_file_path:
+            self.status_label.setText("No file selected for processing")
+            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
+            return
+        
+        # TODO: Implement the actual processing script here
+        # For now, just show a placeholder message
+        self.status_label.setText("Processing script will be implemented here...")
+        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #17a2b8; background: #d1ecf1; color: #0c5460;")
+        
+        # Placeholder for future script execution:
+        # import subprocess
+        # try:
+        #     result = subprocess.run(['python', 'your_processing_script.py', self.current_file_path], 
+        #                           capture_output=True, text=True, check=True)
+        #     self.status_label.setText(f"Processing completed: {result.stdout}")
+        # except subprocess.CalledProcessError as e:
+        #     self.status_label.setText(f"Processing failed: {e.stderr}")
+        
+        print(f"Processing file: {self.current_file_path}")
+    
     def closeEvent(self, event):
-        """Handle application close event."""
+        """Handle application close."""
         if self.file_processor and self.file_processor.isRunning():
             self.file_processor.terminate()
             self.file_processor.wait()
@@ -504,17 +270,11 @@ class HabibUniversityApp(QMainWindow):
 def main():
     """Main application entry point."""
     app = QApplication(sys.argv)
-    
-    # Set application properties
     app.setApplicationName("Habib University File Manager")
-    app.setApplicationVersion("1.0.0")
-    app.setOrganizationName("Habib University")
     
-    # Create and show main window
     window = HabibUniversityApp()
     window.show()
     
-    # Start event loop
     sys.exit(app.exec())
 
 
