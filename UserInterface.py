@@ -88,7 +88,8 @@ class HabibUniversityApp(QMainWindow):
         layout.setContentsMargins(30, 30, 30, 30)
         
         # Title
-        title = QLabel("Habib University File Manager")
+        title = QLabel("Habib University CLO/PLO Mapping Tool")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #6B2C91;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
         layout.addWidget(title)
@@ -270,7 +271,8 @@ class HabibUniversityApp(QMainWindow):
 def main():
     """Main application entry point."""
     app = QApplication(sys.argv)
-    app.setApplicationName("Habib University File Manager")
+    app.setApplicationName("Habib University CLO/PLO Mapping Tool")
+    app.setStyle("Fusion")
     
     window = HabibUniversityApp()
     window.show()
