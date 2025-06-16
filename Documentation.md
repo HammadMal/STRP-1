@@ -1,14 +1,15 @@
 # Userinterface.py documentation: 
 
 ## Overview
-A simplified PyQt6-based desktop application for file management and processing at Habib University. This application provides a clean, user-friendly interface for loading spreadsheet files and executing processing scripts.
+A simplified PyQt6-based desktop application for file management and processing at Habib University. This application provides a clean, user-friendly interface for loading spreadsheet files and executing the data.py processing script.
 
 ## Features
 - **File Loading**: Support for Excel (.xlsx, .xls) and CSV (.csv) files
 - **Background Processing**: Non-blocking file loading with progress indication
 - **File Validation**: Automatic validation of file content and format
-- **External Script Integration**: Ready-to-implement processing script execution
+- **External Script Integration**: Integrated with data.py for file processing
 - **University Branding**: Clean interface with Habib University color scheme
+- **UTF-8 Support**: Handles Unicode characters in processing scripts
 
 ## Requirements
 ```bash
@@ -19,7 +20,8 @@ pip install PyQt6 pandas openpyxl
 ```
 project/
 ├── UserInterface.py          # Main application file
-└── README.md               # This documentation
+├── data.py                   # Data processing script
+└── Documentation.md          # This documentation
 ```
 
 ## Usage
@@ -32,7 +34,7 @@ python UserInterface.py
 ### Basic Workflow
 1. **Browse Files**: Click "Browse Files" to select a spreadsheet file
 2. **File Loading**: The application automatically validates and loads the file
-3. **Process Files**: Once loaded successfully, click "Process Files" to run processing scripts
+3. **Process Files**: Once loaded successfully, click "Process Files" to run data.py
 
 ### Supported File Formats
 - **CSV Files**: `.csv`
@@ -49,16 +51,25 @@ The main application window that handles the user interface and user interaction
 - `init_ui()`: Sets up the user interface components
 - `browse_file()`: Opens file dialog for file selection
 - `load_file()`: Initiates file loading process
-- `process_files()`: Executes processing scripts (to be implemented)
+- `process_files()`: Executes data.py processing script
 
 #### `FileProcessor`
-Background thread class for non-blocking file processing.
+Background thread class for non-blocking file loading and validation.
 
 **Key Methods:**
 - `run()`: Processes the selected file and validates content
 - **Signals:**
   - `finished(bool, str)`: Emitted when processing completes
   - `progress(int)`: Emitted to update progress bar
+
+#### `DataProcessor`
+Background thread class for running data.py script without freezing the UI.
+
+**Key Methods:**
+- `run()`: Executes data.py with the selected file path
+- **Signals:**
+  - `finished(bool, str)`: Emitted when data processing completes
+  - `progress(str)`: Emitted to update status during processing
 
 ### UI Components
 - **Title**: Application header with university branding
@@ -67,91 +78,28 @@ Background thread class for non-blocking file processing.
 - **Status Display**: Real-time feedback on operations
 - **Progress Bar**: Visual indication during file loading
 
-## Implementation Guide
+## Integration with data.py
 
-### Adding Processing Scripts
+The application is integrated with data.py which performs the following operations:
+- Loads Excel files from the 'Data' sheet
+- Cleans hidden characters and empty rows/columns
+- Removes rows with less than 2 characters
+- Filters columns with less than 70% missing values
+- Outputs the cleaned dataframe
 
-To implement your own processing script, modify the `process_files()` method:
+### data.py Command Line Usage
+The data.py script can be used in multiple ways:
 
-```python
-def process_files(self):
-    """Process the loaded file with external script."""
-    if not self.current_file_path:
-        return
-    
-    import subprocess
-    try:
-        # Replace 'your_script.py' with your actual script
-        result = subprocess.run([
-            'python', 
-            'your_processing_script.py', 
-            self.current_file_path
-        ], capture_output=True, text=True, check=True)
-        
-        # Update status with success message
-        self.status_label.setText(f"Processing completed: {result.stdout}")
-        self.status_label.setStyleSheet("/* success styling */")
-        
-    except subprocess.CalledProcessError as e:
-        # Handle errors
-        self.status_label.setText(f"Processing failed: {e.stderr}")
-        self.status_label.setStyleSheet("/* error styling */")
+```bash
+# With UI (automatic)
+# The UI passes the file path automatically
+
+# Standalone with default path
+python data.py
+
+# With custom file path
+python data.py "path/to/your/file.xlsx"
 ```
-
-### Processing Script Template
-
-Your processing script should accept the file path as a command-line argument:
-
-```python
-#!/usr/bin/env python3
-import sys
-import pandas as pd
-
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python script.py <file_path>")
-        sys.exit(1)
-    
-    file_path = sys.argv[1]
-    
-    # Load the file
-    if file_path.endswith('.csv'):
-        df = pd.read_csv(file_path)
-    else:
-        df = pd.read_excel(file_path)
-    
-    # Your processing logic here
-    print(f"Processed {len(df)} rows successfully")
-
-if __name__ == "__main__":
-    main()
-```
-
-## Customization
-
-### Colors and Styling
-The application uses Habib University's color scheme:
-- **Primary Purple**: `#6B2C91`
-- **Hover Purple**: `#5A2478`
-- **Pressed Purple**: `#4A1D63`
-- **Background**: `#FFFFFF`
-
-To modify colors, update the `setStyleSheet()` calls in the button definitions.
-
-### Window Properties
-Default window size and constraints can be modified in `init_ui()`:
-```python
-self.setMinimumSize(500, 350)  # Minimum width, height
-self.resize(600, 450)          # Default width, height
-```
-
-## Error Handling
-
-The application handles several error conditions:
-- **Unsupported file formats**: Shows error message
-- **Empty files**: Validates and rejects empty datasets
-- **File reading errors**: Catches pandas exceptions
-- **Processing errors**: Will display subprocess errors (when implemented)
 
 ## Status Messages
 
@@ -162,9 +110,79 @@ The application provides real-time feedback through color-coded status messages:
 - **Red**: Error
 - **Blue**: Information/Processing script status
 
+## Error Handling
+
+The application handles several error conditions:
+- **Unsupported file formats**: Shows error message
+- **Empty files**: Validates and rejects empty datasets
+- **File reading errors**: Catches pandas exceptions
+- **Processing errors**: Displays subprocess errors
+- **Encoding errors**: Handles UTF-8 encoding for special characters
+
 ## Thread Safety
 
-File loading operations run in a separate thread (`FileProcessor`) to prevent UI freezing. The main thread communicates with the background thread through Qt signals.
+- File loading operations run in a separate thread (`FileProcessor`) 
+- Data processing runs in a separate thread (`DataProcessor`)
+- Main thread communicates with background threads through Qt signals
+- Prevents UI freezing during long operations
+
+## Output Display
+
+- Processing output is displayed in the status area
+- Long outputs (>10 lines) are truncated in the UI for readability
+- Full output is always printed to the console
+- Console output is prefixed with "=== Data Processing Output ==="
+
+## Customization
+
+### Colors and Styling
+The application uses Habib University's color scheme:
+- **Primary Purple**: `#6B2C91`
+- **Hover Purple**: `#5A2478`
+- **Pressed Purple**: `#4A1D63`
+- **Background**: `#FFFFFF`
+
+### Window Properties
+Default window size and constraints can be modified in `init_ui()`:
+```python
+self.setMinimumSize(500, 350)  # Minimum width, height
+self.resize(600, 450)          # Default width, height
+```
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+1. **"No module named 'PyQt6'"**: 
+   ```bash
+   pip install PyQt6
+   ```
+
+2. **"No module named 'pandas'"**: 
+   ```bash
+   pip install pandas openpyxl
+   ```
+
+3. **Encoding errors with special characters**:
+   - The data.py script now forces UTF-8 encoding
+   - Special characters are replaced with ASCII equivalents
+
+4. **"Processing script 'data.py' not found"**:
+   - Ensure data.py is in the same directory as UserInterface.py
+
+5. **Excel files not loading**: 
+   - Install openpyxl: `pip install openpyxl`
+   - Ensure the Excel file has a sheet named 'Data'
+
+6. **Process button stays disabled**: 
+   - Check that file loaded successfully
+   - Check status messages for errors
+
+### Debug Information
+The application prints debug information to console:
+- File paths during processing
+- Full data.py output
+- Error messages and stack traces
 
 ## Future Enhancements
 
@@ -173,20 +191,9 @@ Potential improvements that can be added:
 - Configuration file for processing script paths
 - Processing history and logs
 - Export functionality for processed results
-- Progress indication for external script execution
-
-## Troubleshooting
-
-### Common Issues
-1. **"No module named 'PyQt6'"**: Install PyQt6 using pip
-2. **"No module named 'pandas'"**: Install pandas using pip
-3. **Excel files not loading**: Install openpyxl for Excel support
-4. **Process button stays disabled**: Check that file loaded successfully
-
-### Debug Information
-The application prints debug information to console:
-- File paths during processing
-- Processing script execution details
+- Progress indication for data.py execution
+- Custom sheet name selection for Excel files
+- Output file saving functionality
 
 ## License
 This application is developed for Habib University internal use.
