@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Optional
 import pandas as pd
+import subprocess
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -62,6 +63,48 @@ class FileProcessor(QThread):
             self.finished.emit(False, f"Error processing file: {str(e)}")
 
 
+class DataProcessor(QThread):
+    """Background thread for running data.py script."""
+    
+    finished = pyqtSignal(bool, str)  # success, message
+    progress = pyqtSignal(str)  # progress updates
+    
+    def __init__(self, file_path: str, script_path: str = "data.py"):
+        super().__init__()
+        self.file_path = file_path
+        self.script_path = script_path
+        
+    def run(self):
+        """Run the data.py script with the file path."""
+        try:
+            self.progress.emit("Starting data processing...")
+            
+            # Check if data.py exists
+            if not os.path.exists(self.script_path):
+                self.finished.emit(False, f"Processing script '{self.script_path}' not found")
+                return
+            
+            # Run the script directly with the file path as argument
+            result = subprocess.run(
+                [sys.executable, self.script_path, self.file_path],
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding='utf-8'  # Handle UTF-8 encoding
+            )
+            
+            # Extract output
+            output = result.stdout if result.stdout else "Processing completed successfully"
+            self.finished.emit(True, output)
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr if e.stderr else str(e)
+            self.finished.emit(False, f"Processing failed: {error_msg}")
+            
+        except Exception as e:
+            self.finished.emit(False, f"Unexpected error: {str(e)}")
+
+
 class HabibUniversityApp(QMainWindow):
     """Main application window."""
     
@@ -69,6 +112,7 @@ class HabibUniversityApp(QMainWindow):
         super().__init__()
         self.current_file_path: Optional[str] = None
         self.file_processor: Optional[FileProcessor] = None
+        self.data_processor: Optional[DataProcessor] = None
         self.init_ui()
     
     def init_ui(self):
@@ -238,33 +282,73 @@ class HabibUniversityApp(QMainWindow):
             self.file_processor = None
     
     def process_files(self):
-        """Process the loaded file with external script."""
+        """Process the loaded file with data.py script."""
         if not self.current_file_path:
             self.status_label.setText("No file selected for processing")
             self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
             return
         
-        # TODO: Implement the actual processing script here
-        # For now, just show a placeholder message
-        self.status_label.setText("Processing script will be implemented here...")
-        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #17a2b8; background: #d1ecf1; color: #0c5460;")
+        # Update UI to show processing state
+        self.status_label.setText("Running data.py processing...")
+        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ffc107; background: #fff3cd; color: #856404;")
         
-        # Placeholder for future script execution:
-        # import subprocess
-        # try:
-        #     result = subprocess.run(['python', 'your_processing_script.py', self.current_file_path], 
-        #                           capture_output=True, text=True, check=True)
-        #     self.status_label.setText(f"Processing completed: {result.stdout}")
-        # except subprocess.CalledProcessError as e:
-        #     self.status_label.setText(f"Processing failed: {e.stderr}")
+        # Disable buttons during processing
+        self.browse_btn.setEnabled(False)
+        self.process_btn.setEnabled(False)
         
-        print(f"Processing file: {self.current_file_path}")
+        # Start data processing in background thread
+        self.data_processor = DataProcessor(self.current_file_path)
+        self.data_processor.finished.connect(self.on_data_processed)
+        self.data_processor.progress.connect(self.update_processing_status)
+        self.data_processor.start()
+    
+    def update_processing_status(self, message: str):
+        """Update status during processing."""
+        self.status_label.setText(message)
+    
+    def on_data_processed(self, success: bool, message: str):
+        """Handle data processing completion."""
+        # Re-enable buttons
+        self.browse_btn.setEnabled(True)
+        self.process_btn.setEnabled(True)
+        
+        # Update status based on result
+        if success:
+            # Show success with output
+            display_message = "Data processing completed successfully!\n"
+            if message:
+                # Truncate long output for display
+                lines = message.strip().split('\n')
+                if len(lines) > 10:
+                    display_message += '\n'.join(lines[:10]) + f"\n... ({len(lines)-10} more lines)"
+                else:
+                    display_message += message
+            
+            self.status_label.setText(display_message)
+            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #28a745; background: #d4edda; color: #155724;")
+            
+            # Also print full output to console
+            print("\n=== Data Processing Output ===")
+            print(message)
+            print("==============================\n")
+            
+        else:
+            self.status_label.setText(f"Processing failed: {message}")
+            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
+        
+        # Clean up
+        if self.data_processor:
+            self.data_processor.deleteLater()
+            self.data_processor = None
     
     def closeEvent(self, event):
         """Handle application close."""
         if self.file_processor and self.file_processor.isRunning():
             self.file_processor.terminate()
             self.file_processor.wait()
+        if self.data_processor and self.data_processor.isRunning():
+            self.data_processor.terminate()
+            self.data_processor.wait()
         event.accept()
 
 

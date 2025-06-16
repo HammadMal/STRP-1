@@ -1,5 +1,10 @@
 import pandas as pd
 import re
+import sys
+import io
+
+# Force UTF-8 encoding for stdout to handle special characters
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 
 # === Load Excel File ===
@@ -7,7 +12,7 @@ def load_excel(file_path: str):
     try:
         df = pd.read_excel(file_path, sheet_name='Data', header=None, engine='openpyxl')
 
-        print("[✓] Loaded Excel file")
+        print("[OK] Loaded Excel file")
         return df
     except Exception as e:
         print("[!] Failed to load Excel:", e)
@@ -22,7 +27,7 @@ def clean_dataframe(df):
     df.dropna(axis=0, how='all', inplace=True)  # rows
     df.dropna(axis=1, how='all', inplace=True)  # columns
 
-    print("[✓] Cleaned hidden characters and empty rows/cols")
+    print("[OK] Cleaned hidden characters and empty rows/cols")
     return df
 
 # === Clean a single cell ===
@@ -57,7 +62,14 @@ def preprocess_excel(file_path):
     df= drop_short_rows(df, char_limit=2)
     return df.loc[:, df.isnull().mean() < 0.7]
 
-df_clean = preprocess_excel("C:/Users/AWAIS GILL/Desktop/OBE STRP/OBE Program/Python files/1911-EE-000-T1.xlsx")
-
-
-print(df_clean)
+# === Main execution ===
+if __name__ == "__main__":
+    # Check if file path is provided as command line argument
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+    else:
+        # Default file path for standalone execution
+        file_path = "C:/Users/AWAIS GILL/Desktop/OBE STRP/OBE Program/Python files/1911-EE-000-T1.xlsx"
+    
+    df_clean = preprocess_excel(file_path)
+    print(df_clean)
