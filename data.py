@@ -1,75 +1,139 @@
 import pandas as pd
 import re
 import sys
-import io
+import json
 
-# Force UTF-8 encoding for stdout to handle special characters
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
-
-# === Load Excel File ===
+# === Load Excel ===
 def load_excel(file_path: str):
     try:
         df = pd.read_excel(file_path, sheet_name='Data', header=None, engine='openpyxl')
-
         print("[OK] Loaded Excel file")
         return df
     except Exception as e:
         print("[!] Failed to load Excel:", e)
         return None
 
-# === Clean Full DataFrame ===
-def clean_dataframe(df):
-    # 1. Remove hidden or undefined characters
-    df = df.applymap(lambda x: clean_cell(x))
-
-    # 2. Drop completely empty rows and columns
-    df.dropna(axis=0, how='all', inplace=True)  # rows
-    df.dropna(axis=1, how='all', inplace=True)  # columns
-
-    print("[OK] Cleaned hidden characters and empty rows/cols")
-    return df
-
-# === Clean a single cell ===
+# === Clean individual cell ===
 def clean_cell(value):
     if pd.isnull(value):
         return None
     val = str(value)
-    # Remove non-breaking spaces, zero-width spaces, and control chars
     val = val.replace('\u200b', '').replace('\xa0', ' ')
-    val = re.sub(r'[\r\n\t]', ' ', val)        # newlines, tabs
-    val = re.sub(r'[^\x00-\x7F]+', '', val)    # remove non-ASCII
-    val = val.strip()
-    return val
+    val = re.sub(r'[\r\n\t]', ' ', val)
+    val = re.sub(r'[^\x00-\x7F]+', '', val)
+    return val.strip()
 
-def drop_short_rows(df, char_limit=2):
-    def row_char_count(row):
-        # Combine all cells into one string, strip spaces, and count characters
-        all_text = ''.join([str(cell).strip() for cell in row if pd.notnull(cell)])
-        return len(all_text)
-
-    # Keep only rows with more than `char_limit` characters
-    df = df[df.apply(row_char_count, axis=1) > char_limit]
+# === Clean entire DataFrame ===
+def clean_dataframe(df):
+    df = df.applymap(lambda x: clean_cell(x))
+    df.dropna(axis=0, how='all', inplace=True)
+    df.dropna(axis=1, how='all', inplace=True)
     return df
 
-# === Main Driver ===
-def preprocess_excel(file_path):
+# === Drop nearly empty rows ===
+def drop_short_rows(df, char_limit=2):
+    def row_char_count(row):
+        all_text = ''.join([str(cell).strip() for cell in row if pd.notnull(cell)])
+        return len(all_text)
+    return df[df.apply(row_char_count, axis=1) > char_limit]
+
+# === Automatically find module and student row indices ===
+def find_data_rows(df):
+    module_row = None
+    for i in range(len(df)):
+        cell_val = str(df.iloc[i, 0]).strip().lower()
+        if "module" in cell_val or "modules" in cell_val:
+            module_row = i
+            break
+    if module_row is None:
+        raise ValueError("Could not find 'Modules' row in sheet.")
+    
+    return module_row, module_row + 1, module_row + 2, module_row + 3
+
+# === Extract CLOs, PLOs, Modules, Scores ===
+def extract_clo_plo_data(df):
+    clos = {}
+    clo_to_plo = {}
+    student_scores = {}
+
+    # Fixed CLO description area (rows 2–6)
+    for i in range(2, 7):
+        clo_id = f"CLO {i - 1}"
+        description = df.iloc[i, 1]
+        ldl = df.iloc[i, 2]
+        plo_map = df.iloc[i, 3]
+        if isinstance(plo_map, str) and ";" in plo_map:
+            plo_id, weight = plo_map.split(";")
+            clo_to_plo[clo_id] = {"PLO": f"PLO {plo_id.strip()}", "weight": int(weight)}
+        clos[clo_id] = {"description": description, "LDL": ldl}
+
+    # Dynamically find module/start rows
+    module_row, clo_map_row, max_score_row, student_start_row = find_data_rows(df)
+
+    module_names = df.iloc[module_row, 1:].tolist()
+    clo_mapping = df.iloc[clo_map_row, 1:].tolist()
+    max_scores = df.iloc[max_score_row, 1:].tolist()
+
+    # Map CLO to assessments
+    clo_assessments = {}
+    for i, (module, mapping, max_score) in enumerate(zip(module_names, clo_mapping, max_scores)):
+        if isinstance(mapping, str) and ";" in mapping:
+            clo_index, weight = mapping.split(";")
+            clo_id = f"CLO {clo_index.strip()}"
+            if clo_id not in clo_assessments:
+                clo_assessments[clo_id] = []
+            clo_assessments[clo_id].append({
+                "module": module,
+                "max_score": float(max_score),
+                "weight": float(weight)
+            })
+
+    # Extract student scores
+    for i in range(student_start_row, df.shape[0]):
+        student_id_raw = df.iloc[i, 0]
+        if pd.isnull(student_id_raw):
+            continue
+        student_id = f"Student {int(student_id_raw)}"
+        scores = df.iloc[i, 1:].tolist()
+        student_scores[student_id] = {
+            module_names[j]: scores[j] for j in range(len(module_names))
+            if pd.notnull(scores[j])
+        }
+
+    return clos, clo_to_plo, clo_assessments, student_scores
+
+# === Run Full Preprocessing ===
+def preprocess_excel_and_extract(file_path):
     df = load_excel(file_path)
     if df is None:
-        return None
+        return
 
     df = clean_dataframe(df)
-    df= drop_short_rows(df, char_limit=2)
-    return df.loc[:, df.isnull().mean() < 0.7]
+    df = drop_short_rows(df, char_limit=2)
+    df = df.loc[:, df.isnull().mean() < 0.7]
 
-# === Main execution ===
+    try:
+        clos, clo_to_plo, clo_assessments, student_scores = extract_clo_plo_data(df)
+    except Exception as e:
+        print(f"[!] Data extraction failed: {e}")
+        return
+
+    # Output as structured JSON
+    print(json.dumps({
+        "clos": clos,
+        "clo_to_plo": clo_to_plo,
+        "clo_assessments": clo_assessments,
+        "student_scores": student_scores
+    }, indent=2))
+
+
+# === Run if executed directly ===
 if __name__ == "__main__":
-    # Check if file path is provided as command line argument
     if len(sys.argv) > 1:
         file_path = sys.argv[1]
     else:
-        # Default file path for standalone execution
-        file_path = "C:/Users/AWAIS GILL/Desktop/OBE STRP/OBE Program/Python files/1911-EE-000-T1.xlsx"
-    
-    df_clean = preprocess_excel(file_path)
-    print(df_clean)
+        file_path = "example_file.xlsx"  # fallback
+    preprocess_excel_and_extract(file_path)
+
+
+# returns marks/clo/plo in dictionary form
