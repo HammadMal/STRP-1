@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Habib University CLO/PLO Mapping UI - Simplified Version
-A basic PyQt6 application for file management and processing.
+Habib University CLO/PLO Mapping UI - Clean Version
+A PyQt6 application for file management, processing, and Excel report generation.
 """
 
 import sys
@@ -12,7 +12,7 @@ import pandas as pd
 import subprocess
 import json
 from clo_plo_calculator import calculate_clo_scores, calculate_plo_scores
-
+from excel_exporter import export_clo_plo_results
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -136,9 +136,8 @@ class HabibUniversityApp(QMainWindow):
         
         # Title
         title = QLabel("Habib University CLO/PLO Mapping Tool")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #6B2C91;")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
         
         # File selection section
@@ -150,27 +149,7 @@ class HabibUniversityApp(QMainWindow):
         self.browse_btn = QPushButton("Browse Files")
         self.browse_btn.clicked.connect(self.browse_file)
         self.browse_btn.setMinimumWidth(120)
-        self.browse_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6B2C91;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: bold;
-                min-height: 25px;
-            }
-            QPushButton:hover {
-                background-color: #5A2478;
-            }
-            QPushButton:pressed {
-                background-color: #4A1D63;
-            }
-            QPushButton:disabled {
-                background-color: #CCCCCC;
-                color: #666666;
-            }
-        """)
+        self.browse_btn.setStyleSheet(self._get_button_style())
         
         file_layout.addWidget(self.file_label, 1)
         file_layout.addWidget(self.browse_btn)
@@ -185,7 +164,26 @@ class HabibUniversityApp(QMainWindow):
         self.process_btn = QPushButton("Process Files")
         self.process_btn.clicked.connect(self.process_files)
         self.process_btn.setEnabled(False)  # Disabled until file is selected
-        self.process_btn.setStyleSheet("""
+        self.process_btn.setStyleSheet(self._get_button_style())
+        layout.addWidget(self.process_btn)
+        
+        # Status label
+        self.status_label = QLabel("Ready")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ddd; background: #f5f5f5;")
+        layout.addWidget(self.status_label)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # Add stretch to center content
+        layout.addStretch()
+    
+    def _get_button_style(self):
+        """Get consistent button styling."""
+        return """
             QPushButton {
                 background-color: #6B2C91;
                 color: white;
@@ -206,22 +204,7 @@ class HabibUniversityApp(QMainWindow):
                 background-color: #CCCCCC;
                 color: #666666;
             }
-        """)
-        layout.addWidget(self.process_btn)
-        
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ddd; background: #f5f5f5;")
-        layout.addWidget(self.status_label)
-        
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
-        # Add stretch to center content
-        layout.addStretch()
+        """
     
     def browse_file(self):
         """Open file dialog to select a file."""
@@ -242,8 +225,7 @@ class HabibUniversityApp(QMainWindow):
         
         # Update UI
         self.file_label.setText(f"Selected: {file_name}")
-        self.status_label.setText("Processing file...")
-        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ffc107; background: #fff3cd; color: #856404;")
+        self._update_status("Processing file...", "processing")
         
         # Show progress bar
         self.progress_bar.setVisible(True)
@@ -269,14 +251,10 @@ class HabibUniversityApp(QMainWindow):
         
         # Update status
         if success:
-            self.status_label.setText(message)
-            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #28a745; background: #d4edda; color: #155724;")
-            # Enable process button after successful file load
+            self._update_status(message, "success")
             self.process_btn.setEnabled(True)
         else:
-            self.status_label.setText(f"Error: {message}")
-            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
-            # Keep process button disabled on error
+            self._update_status(f"Error: {message}", "error")
             self.process_btn.setEnabled(False)
         
         # Clean up
@@ -287,13 +265,11 @@ class HabibUniversityApp(QMainWindow):
     def process_files(self):
         """Process the loaded file with data.py script."""
         if not self.current_file_path:
-            self.status_label.setText("No file selected for processing")
-            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
+            self._update_status("No file selected for processing", "error")
             return
         
         # Update UI to show processing state
-        self.status_label.setText("Running data.py processing...")
-        self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ffc107; background: #fff3cd; color: #856404;")
+        self._update_status("Running data.py processing...", "processing")
         
         # Disable buttons during processing
         self.browse_btn.setEnabled(False)
@@ -302,12 +278,8 @@ class HabibUniversityApp(QMainWindow):
         # Start data processing in background thread
         self.data_processor = DataProcessor(self.current_file_path)
         self.data_processor.finished.connect(self.on_data_processed)
-        self.data_processor.progress.connect(self.update_processing_status)
+        self.data_processor.progress.connect(self._update_status)
         self.data_processor.start()
-    
-    def update_processing_status(self, message: str):
-        """Update status during processing."""
-        self.status_label.setText(message)
     
     def on_data_processed(self, success: bool, message: str):
         """Handle data processing completion."""
@@ -315,62 +287,86 @@ class HabibUniversityApp(QMainWindow):
         self.browse_btn.setEnabled(True)
         self.process_btn.setEnabled(True)
         
-        # Update status based on result
-        if success:
-            
-            # Show success with output
-            display_message = "Data processing completed successfully!\n"
-            if message:
-                # Truncate long output for display
-                lines = message.strip().split('\n')
-                if len(lines) > 10:
-                    display_message += '\n'.join(lines[:10]) + f"\n... ({len(lines)-10} more lines)"
-                else:
-                    display_message += message
-            
-            self.status_label.setText(display_message)
-            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #28a745; background: #d4edda; color: #155724;")
-            
-            # Also print full output to console
-            print("\n=== Data Processing Output ===")
-            print(message)
-            print("==============================\n")
-            
-        else:
-            self.status_label.setText(f"Processing failed: {message}")
-            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
+        if not success:
+            self._update_status(f"Processing failed: {message}", "error")
+            self._cleanup_processor()
+            return
         
+        # Print full output to console
+        print("\n=== Data Processing Output ===")
+        print(message)
+        print("==============================\n")
+        
+        # Process the results
         try:
-            # Extract JSON block from message
-            json_start = message.find("{")
-            if json_start == -1:
-                raise ValueError("No JSON found in output")
-            
-            json_data = message[json_start:]
-            data_dict = json.loads(json_data)
-
-            # CLO & PLO calculations
-            clo_scores = calculate_clo_scores(data_dict["clo_assessments"], data_dict["student_scores"])
-            plo_scores = calculate_plo_scores(clo_scores, data_dict["clo_to_plo"])
-
-            # Format scores into a readable string
-            clo_output = "\n🎯 CLO Scores:\n" + "\n".join(f"{k}: {v}" for k, v in clo_scores.items())
-            plo_output = "\n📊 PLO Scores:\n" + "\n".join(f"{k}: {v}" for k, v in plo_scores.items())
-
-            print(clo_output)
-            print(plo_output)
-
-            self.status_label.setText("CLO/PLO calculation complete. See terminal output.")
-            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #28a745; background: #d4edda; color: #155724;")
-        
+            self._process_calculation_results(message)
         except Exception as e:
-            self.status_label.setText(f"Calculation failed: {str(e)}")
-            self.status_label.setStyleSheet("padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;")
+            self._update_status(f"Calculation failed: {str(e)}", "error")
+        
+        self._cleanup_processor()
+    
+    def _process_calculation_results(self, message: str):
+        """Process CLO/PLO calculations and create Excel output."""
+        # Extract JSON block from message
+        json_start = message.find("{")
+        if json_start == -1:
+            raise ValueError("No JSON found in output")
+        
+        json_data = message[json_start:]
+        data_dict = json.loads(json_data)
 
+        # CLO & PLO calculations
+        clo_scores = calculate_clo_scores(data_dict["clo_assessments"], data_dict["student_scores"])
+        plo_scores = calculate_plo_scores(clo_scores, data_dict["clo_to_plo"])
 
+        # Print scores to console
+        self._print_scores_to_console(clo_scores, plo_scores)
 
-
-        # Clean up
+        # Create Excel output
+        try:
+            output_file = export_clo_plo_results(clo_scores, plo_scores, data_dict)
+            
+            self._update_status(f"CLO/PLO calculation complete. Excel file created: {output_file}", "success")
+            
+            # Show success message box
+            self._show_success_dialog(output_file)
+            
+        except Exception as excel_error:
+            print(f"\n❌ Excel export failed: {excel_error}")
+            self._update_status("CLO/PLO calculation complete. See terminal output. (Excel export failed)", "warning")
+    
+    def _print_scores_to_console(self, clo_scores, plo_scores):
+        """Print formatted scores to console."""
+        clo_output = "\n🎯 CLO Scores:\n" + "\n".join(f"{k}: {v}" for k, v in clo_scores.items())
+        plo_output = "\n📊 PLO Scores:\n" + "\n".join(f"{k}: {v}" for k, v in plo_scores.items())
+        
+        print(clo_output)
+        print(plo_output)
+    
+    def _show_success_dialog(self, output_file: str):
+        """Show success dialog with file path."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Export Complete")
+        msg.setText(f"Results exported successfully to:\n{output_file}")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+    
+    def _update_status(self, message: str, status_type: str = "info"):
+        """Update status label with appropriate styling."""
+        styles = {
+            "success": "padding: 12px; border: 1px solid #28a745; background: #d4edda; color: #155724;",
+            "error": "padding: 12px; border: 1px solid #dc3545; background: #f8d7da; color: #721c24;",
+            "warning": "padding: 12px; border: 1px solid #ffc107; background: #fff3cd; color: #856404;",
+            "processing": "padding: 12px; border: 1px solid #ffc107; background: #fff3cd; color: #856404;",
+            "info": "padding: 12px; border: 1px solid #ddd; background: #f5f5f5;"
+        }
+        
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet(styles.get(status_type, styles["info"]))
+    
+    def _cleanup_processor(self):
+        """Clean up data processor thread."""
         if self.data_processor:
             self.data_processor.deleteLater()
             self.data_processor = None
