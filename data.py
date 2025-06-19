@@ -93,12 +93,13 @@ def extract_clo_plo_data(df):
         student_id_raw = df.iloc[i, 0]
         if pd.isnull(student_id_raw):
             continue
-        student_id = f"Student {int(student_id_raw)}"
+        student_id = str(student_id_raw).strip() 
         scores = df.iloc[i, 1:].tolist()
         student_scores[student_id] = {
-            module_names[j]: scores[j] for j in range(len(module_names))
-            if pd.notnull(scores[j])
-        }
+        module_names[j]: scores[j] for j in range(len(module_names))
+        if pd.notnull(scores[j])
+    }
+
 
     return clos, clo_to_plo, clo_assessments, student_scores
 
