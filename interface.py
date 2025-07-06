@@ -312,32 +312,32 @@ class HabibUniversityApp(QMainWindow):
         self._cleanup_processor()
     
     def _process_calculation_results(self, message: str):
-        """Process CLO/PLO calculations and create Excel output."""
-        # Extract JSON block from message
-        json_start = message.find("{")
-        if json_start == -1:
-            raise ValueError("No JSON found in output")
+            """Process CLO/PLO calculations and create Excel output."""
+            # Extract JSON block from message
+            json_start = message.find("{")
+            if json_start == -1:
+                raise ValueError("No JSON found in output")
 
-        json_data = message[json_start:]
-        data_dict = json.loads(json_data)
+            json_data = message[json_start:]
+            data_dict = json.loads(json_data)
 
-        # Calculate scores
-        clo_scores = calculate_clo_scores(data_dict["clo_assessments"], data_dict["student_scores"])
-        plo_scores = calculate_plo_scores(clo_scores, data_dict["clo_to_plo"])
-        grades = calculate_grades(data_dict["clo_assessments"], data_dict["student_scores"])
-        clo_weights = get_total_clo_weights(data_dict["clo_assessments"])
+            # Calculate scores
+            clo_scores = calculate_clo_scores(data_dict["clo_assessments"], data_dict["student_scores"])
+            plo_scores = calculate_plo_scores(clo_scores, data_dict["clo_to_plo"])
+            grades = calculate_grades(data_dict["clo_assessments"], data_dict["student_scores"])
+            clo_weights = get_total_clo_weights(data_dict["clo_assessments"])
 
-        # Print to terminal
-        self._print_scores_to_console(clo_scores, plo_scores, grades, clo_weights)
+            # Print to terminal
+            self._print_scores_to_console(clo_scores, plo_scores, grades, clo_weights)
 
-        # Create Excel output
-        try:
-            output_file = export_clo_plo_results(clo_scores, plo_scores, data_dict)
-            self._update_status(f"CLO/PLO calculation complete. Excel file created: {output_file}", "success")
-            self._show_success_dialog(output_file)
-        except Exception as excel_error:
-            print(f"\n❌ Excel export failed: {excel_error}")
-            self._update_status("CLO/PLO calculation complete. See terminal output. (Excel export failed)", "warning")
+            # Create Excel output (now passing grades as parameter)
+            try:
+                output_file = export_clo_plo_results(clo_scores, plo_scores, grades, data_dict)
+                self._update_status(f"CLO/PLO calculation complete. Excel file created: {output_file}", "success")
+                self._show_success_dialog(output_file)
+            except Exception as excel_error:
+                print(f"\n❌ Excel export failed: {excel_error}")
+                self._update_status("CLO/PLO calculation complete. See terminal output. (Excel export failed)", "warning")
 
     def _print_scores_to_console(self, clo_scores, plo_scores, grades, clo_weights):
         """Print CLO, PLO, Grades, and CLO weights to terminal."""

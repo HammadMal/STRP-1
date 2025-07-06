@@ -1,6 +1,7 @@
 """
 Excel Export Module for CLO/PLO Mapping Tool
 Handles creation of formatted Excel reports with student performance data.
+Modified to accept grades from terminal instead of calculating them internally.
 """
 
 import pandas as pd
@@ -9,16 +10,14 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from datetime import datetime
 
 
-def create_excel_output(clo_scores, plo_scores, data_dict, output_file=None):
+def create_excel_output(clo_scores, plo_scores, grades, data_dict, output_file=None):
     """
-    Create an Excel file with CLO and PLO scores in a formatted table.
-    
-    Note: Overall grade calculation temporarily removed - to be added after 
-    confirming calculation method with instructor.
+    Create an Excel file with CLO, PLO scores, and final grades in a formatted table.
     
     Args:
         clo_scores (dict): Dictionary of CLO scores for each student
         plo_scores (dict): Dictionary of PLO scores for each student
+        grades (dict): Dictionary of final grades for each student (from terminal calculation)
         data_dict (dict): Original data dictionary from data.py
         output_file (str, optional): Output file path. If None, auto-generates name.
     
@@ -65,8 +64,10 @@ def create_excel_output(clo_scores, plo_scores, data_dict, output_file=None):
         for plo in sorted_plos:
             row_data[plo] = plo_scores[student_id].get(plo, 0)
         
-        # TODO: Add overall grade calculation after confirming method with sir
-        # row_data['Overall Grade'] = "TBD"
+        # Add overall grade (from terminal calculation)
+        grade_percentage = grades.get(student_id, 0)
+        letter_grade = _calculate_letter_grade(grade_percentage)
+        row_data['Overall Grade'] = f"{grade_percentage:.2f}% ({letter_grade})"
         
         data_rows.append(row_data)
     
@@ -86,52 +87,9 @@ def create_excel_output(clo_scores, plo_scores, data_dict, output_file=None):
         _format_main_sheet(worksheet, df, sorted_clos, sorted_plos)
         
         # Create and format summary sheet
-        _create_summary_sheet(writer, clo_scores, plo_scores, sorted_clos, sorted_plos)
+        _create_summary_sheet(writer, clo_scores, plo_scores, grades, sorted_clos, sorted_plos)
     
     return output_file
-
-
-def _calculate_overall_grade_like_sir(clo_scores, student_raw_scores):
-    """
-    Calculate overall grade using sir's weighted assessment method.
-    
-    Args:
-        clo_scores (dict): CLO scores for the student
-        student_raw_scores (dict): Raw assessment scores for bonus calculation
-    
-    Returns:
-        float: Overall grade matching sir's calculation
-    """
-    # Assessment weights from the course structure
-    assessment_weights = {
-        'CLO 1': 0.15,  # Q1 weight (15%)
-        'CLO 4': 0.15,  # Quiz 3 weight (15%)
-        'CLO 5': 0.35   # Quiz 2 weight (35%)
-    }
-    
-    # Calculate weighted sum for active CLOs
-    weighted_sum = 0
-    total_weight = 0
-    
-    for clo, weight in assessment_weights.items():
-        if clo in clo_scores:
-            weighted_sum += clo_scores[clo] * weight
-            total_weight += weight
-    
-    # Calculate base overall score (scale to 100%)
-    base_score = (weighted_sum / total_weight) if total_weight > 0 else 0
-    
-    # Add bonus points if available
-    bonus = 0
-    if student_raw_scores and 'Bonus' in student_raw_scores:
-        try:
-            bonus = float(student_raw_scores['Bonus'])
-        except (ValueError, TypeError):
-            bonus = 0
-    
-    overall_score = base_score + bonus
-    
-    return round(overall_score, 1)
 
 
 def _calculate_letter_grade(score):
@@ -160,14 +118,12 @@ def _calculate_letter_grade(score):
 
 def _get_score_color(score):
     """Get color fill based on score value."""
-    if score >= 80:
+    if score >= 70:
         return PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # Light green
     elif score >= 60:
-        return PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")  # Light yellow
-    elif score >= 40:
-        return PatternFill(start_color="FFB347", end_color="FFB347", fill_type="solid")  # Light orange
+        return PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")  # Yellow
     else:
-        return PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Light red
+        return PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Red
 
 
 def _format_main_sheet(worksheet, df, sorted_clos, sorted_plos):
@@ -185,7 +141,7 @@ def _format_main_sheet(worksheet, df, sorted_clos, sorted_plos):
     
     # Format data cells with color coding
     for row in range(2, len(df) + 2):
-        for column in range(2, len(df.columns) + 1):  # Include all columns now (no Overall Grade to skip)
+        for column in range(2, len(df.columns)):  # Skip Overall Grade column for score coloring
             cell = worksheet.cell(row=row, column=column)
             value = cell.value
             
@@ -193,9 +149,14 @@ def _format_main_sheet(worksheet, df, sorted_clos, sorted_plos):
                 cell.fill = _get_score_color(value)
                 cell.alignment = Alignment(horizontal="center")
                 
-                # Special formatting for zero scores (like CLO 2, CLO 3)
+                # Special formatting for zero scores - keep red
                 if value == 0:
-                    cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")  # Red background
+                    cell.fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Red background
+        
+        # Format Overall Grade column differently
+        grade_cell = worksheet.cell(row=row, column=len(df.columns))
+        grade_cell.alignment = Alignment(horizontal="center")
+        # You can add special formatting for grades if needed
     
     # Auto-adjust column widths
     for column in worksheet.columns:
@@ -211,7 +172,7 @@ def _format_main_sheet(worksheet, df, sorted_clos, sorted_plos):
         worksheet.column_dimensions[column_letter].width = adjusted_width
 
 
-def _create_summary_sheet(writer, clo_scores, plo_scores, sorted_clos, sorted_plos):
+def _create_summary_sheet(writer, clo_scores, plo_scores, grades, sorted_clos, sorted_plos):
     """Create and format the summary sheet with performance analytics."""
     
     summary_data = []
@@ -241,6 +202,43 @@ def _create_summary_sheet(writer, clo_scores, plo_scores, sorted_clos, sorted_pl
             below_60 = sum(1 for score in scores if score < 60)
             summary_data.append([plo, f"{avg_score:.1f}", above_80, below_60])
     
+    # Add Overall Grade Summary
+    summary_data.append([])
+    summary_data.append(['Overall Grade Summary'])
+    summary_data.append([])
+    summary_data.append(['Grade Range', 'Number of Students'])
+    
+    # Count students in each grade range
+    grade_ranges = {'A+ (95-100%)': 0, 'A (90-94%)': 0, 'A- (85-89%)': 0, 
+                   'B+ (80-84%)': 0, 'B (75-79%)': 0, 'B- (70-74%)': 0,
+                   'C+ (67-69%)': 0, 'C (63-66%)': 0, 'C- (60-62%)': 0, 'F (<60%)': 0}
+    
+    for student_grade in grades.values():
+        letter_grade = _calculate_letter_grade(student_grade)
+        if letter_grade == 'A+':
+            grade_ranges['A+ (95-100%)'] += 1
+        elif letter_grade == 'A':
+            grade_ranges['A (90-94%)'] += 1
+        elif letter_grade == 'A-':
+            grade_ranges['A- (85-89%)'] += 1
+        elif letter_grade == 'B+':
+            grade_ranges['B+ (80-84%)'] += 1
+        elif letter_grade == 'B':
+            grade_ranges['B (75-79%)'] += 1
+        elif letter_grade == 'B-':
+            grade_ranges['B- (70-74%)'] += 1
+        elif letter_grade == 'C+':
+            grade_ranges['C+ (67-69%)'] += 1
+        elif letter_grade == 'C':
+            grade_ranges['C (63-66%)'] += 1
+        elif letter_grade == 'C-':
+            grade_ranges['C- (60-62%)'] += 1
+        else:
+            grade_ranges['F (<60%)'] += 1
+    
+    for grade_range, count in grade_ranges.items():
+        summary_data.append([grade_range, count])
+    
     # Write summary data
     summary_df = pd.DataFrame(summary_data)
     summary_df.to_excel(writer, sheet_name='Summary', index=False, header=False)
@@ -249,7 +247,7 @@ def _create_summary_sheet(writer, clo_scores, plo_scores, sorted_clos, sorted_pl
     summary_ws = writer.sheets['Summary']
     
     # Bold the summary headers
-    header_rows = [1, len(sorted_clos) + 6]  # CLO and PLO summary headers
+    header_rows = [1, len(sorted_clos) + 6, len(sorted_clos) + len(sorted_plos) + 12]  # CLO, PLO, and Grade summary headers
     for row in header_rows:
         try:
             cell = summary_ws.cell(row=row, column=1)
@@ -258,7 +256,7 @@ def _create_summary_sheet(writer, clo_scores, plo_scores, sorted_clos, sorted_pl
             pass
     
     # Bold the column headers
-    column_header_rows = [3, len(sorted_clos) + 8]  # CLO and PLO column headers
+    column_header_rows = [3, len(sorted_clos) + 8, len(sorted_clos) + len(sorted_plos) + 14]  # CLO, PLO, and Grade column headers
     for row in column_header_rows:
         try:
             for col in range(1, 5):
@@ -280,66 +278,15 @@ def _create_summary_sheet(writer, clo_scores, plo_scores, sorted_clos, sorted_pl
         adjusted_width = min(max_length + 2, 25)
         summary_ws.column_dimensions[column_letter].width = adjusted_width
 
-    # Add calculation explanation sheet
-    _create_calculation_explanation_sheet(writer)
 
-
-def _create_calculation_explanation_sheet(writer):
-    """Create a sheet explaining the overall grade calculation method."""
-    
-    explanation_data = [
-        ['Overall Grade Calculation Method'],
-        [''],
-        ['This Excel file uses the same calculation method as the original course spreadsheet.'],
-        [''],
-        ['Formula: Overall Grade = (CLO1×15% + CLO4×15% + CLO5×35%) ÷ 65% + Bonus'],
-        [''],
-        ['Explanation:'],
-        ['• CLO 1 weight: 15% (from Q1 assessment)'],
-        ['• CLO 4 weight: 15% (from Quiz 3 assessment)'],
-        ['• CLO 5 weight: 35% (from Quiz 2 assessment)'],
-        ['• Total active weight: 65% (CLO 2 and CLO 3 had no assessments)'],
-        ['• Division by 65% scales the score to represent full course performance'],
-        ['• Bonus points are added after the weighted calculation'],
-        [''],
-        ['This method ensures:'],
-        ['• Fair weighting based on actual assessment importance'],
-        ['• No penalty for unassessed CLOs (CLO 2, CLO 3)'],
-        ['• Consistency with instructor\'s grading system'],
-        [''],
-        ['Generated by Habib University CLO/PLO Mapping Tool']
-    ]
-    
-    # Write explanation data
-    explanation_df = pd.DataFrame(explanation_data)
-    explanation_df.to_excel(writer, sheet_name='Calculation Method', index=False, header=False)
-    
-    # Format explanation sheet
-    explanation_ws = writer.sheets['Calculation Method']
-    
-    # Bold the title
-    title_cell = explanation_ws.cell(row=1, column=1)
-    title_cell.font = Font(bold=True, size=16, color="6B2C91")
-    
-    # Bold section headers
-    for row in [7, 15]:  # "Explanation:" and "This method ensures:"
-        try:
-            cell = explanation_ws.cell(row=row, column=1)
-            cell.font = Font(bold=True, size=12)
-        except:
-            pass
-    
-    # Adjust column width
-    explanation_ws.column_dimensions['A'].width = 80
-
-
-def export_clo_plo_results(clo_scores, plo_scores, data_dict, output_dir=None):
+def export_clo_plo_results(clo_scores, plo_scores, grades, data_dict, output_dir=None):
     """
     Main export function - creates Excel file with CLO/PLO results.
     
     Args:
         clo_scores (dict): CLO scores for all students
-        plo_scores (dict): PLO scores for all students  
+        plo_scores (dict): PLO scores for all students
+        grades (dict): Final grades for all students (from terminal calculation)
         data_dict (dict): Original data from data.py
         output_dir (str, optional): Directory to save file in
         
@@ -355,7 +302,7 @@ def export_clo_plo_results(clo_scores, plo_scores, data_dict, output_dir=None):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = f"{output_dir}/CLO_PLO_Results_{timestamp}.xlsx"
         
-        file_path = create_excel_output(clo_scores, plo_scores, data_dict, output_file)
+        file_path = create_excel_output(clo_scores, plo_scores, grades, data_dict, output_file)
         print(f"✅ Excel export successful: {file_path}")
         return file_path
         
