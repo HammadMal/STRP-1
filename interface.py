@@ -11,7 +11,13 @@ from typing import Optional
 import pandas as pd
 import subprocess
 import json
-from clo_plo_calculator import calculate_clo_scores, calculate_plo_scores
+from clo_plo_calculator import (
+    calculate_clo_scores,
+    calculate_plo_scores,
+    calculate_grades,
+    get_letter_grade,
+    get_total_clo_weights
+)
 from excel_exporter import export_clo_plo_results
 
 from PyQt6.QtWidgets import (
@@ -311,37 +317,47 @@ class HabibUniversityApp(QMainWindow):
         json_start = message.find("{")
         if json_start == -1:
             raise ValueError("No JSON found in output")
-        
+
         json_data = message[json_start:]
         data_dict = json.loads(json_data)
 
-        # CLO & PLO calculations
+        # Calculate scores
         clo_scores = calculate_clo_scores(data_dict["clo_assessments"], data_dict["student_scores"])
         plo_scores = calculate_plo_scores(clo_scores, data_dict["clo_to_plo"])
+        grades = calculate_grades(data_dict["clo_assessments"], data_dict["student_scores"])
+        clo_weights = get_total_clo_weights(data_dict["clo_assessments"])
 
-        # Print scores to console
-        self._print_scores_to_console(clo_scores, plo_scores)
+        # Print to terminal
+        self._print_scores_to_console(clo_scores, plo_scores, grades, clo_weights)
 
         # Create Excel output
         try:
             output_file = export_clo_plo_results(clo_scores, plo_scores, data_dict)
-            
             self._update_status(f"CLO/PLO calculation complete. Excel file created: {output_file}", "success")
-            
-            # Show success message box
             self._show_success_dialog(output_file)
-            
         except Exception as excel_error:
             print(f"\n❌ Excel export failed: {excel_error}")
             self._update_status("CLO/PLO calculation complete. See terminal output. (Excel export failed)", "warning")
-    
-    def _print_scores_to_console(self, clo_scores, plo_scores):
-        """Print formatted scores to console."""
-        clo_output = "\n🎯 CLO Scores:\n" + "\n".join(f"{k}: {v}" for k, v in clo_scores.items())
-        plo_output = "\n📊 PLO Scores:\n" + "\n".join(f"{k}: {v}" for k, v in plo_scores.items())
-        
-        print(clo_output)
-        print(plo_output)
+
+    def _print_scores_to_console(self, clo_scores, plo_scores, grades, clo_weights):
+        """Print CLO, PLO, Grades, and CLO weights to terminal."""
+        print("\n🎯 CLO Scores:")
+        for student, scores in clo_scores.items():
+            print(f"{student}: {scores}")
+
+        print("\n📊 PLO Scores:")
+        for student, scores in plo_scores.items():
+            print(f"{student}: {scores}")
+
+        print("\n🧮 Final Grades:")
+        for student, percent in grades.items():
+            letter = get_letter_grade(percent)
+            print(f"{student}: {percent:.2f}% ({letter})")
+
+        print("\n📌 Total CLO Weights:")
+        for clo, weight in clo_weights.items():
+            print(f"{clo}: {weight} %")
+
     
     def _show_success_dialog(self, output_file: str):
         """Show success dialog with file path."""
