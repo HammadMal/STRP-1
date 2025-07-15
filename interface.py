@@ -2,6 +2,7 @@
 """
 Habib University CLO/PLO Mapping UI - Clean Version
 A PyQt6 application for file management, processing, and Excel report generation.
+Updated to append results to the original uploaded file instead of creating new files.
 """
 
 import sys
@@ -49,10 +50,13 @@ class FileProcessor(QThread):
             # Load file based on extension
             if file_ext == '.csv':
                 df = pd.read_csv(self.file_path)
+                # For CSV files, warn that results cannot be appended
+                self.finished.emit(False, "CSV files are not supported for result appending. Please use Excel format (.xlsx or .xls)")
+                return
             elif file_ext in ['.xlsx', '.xls']:
                 df = pd.read_excel(self.file_path)
             else:
-                self.finished.emit(False, "Unsupported file format")
+                self.finished.emit(False, "Unsupported file format. Please use Excel (.xlsx, .xls) format.")
                 return
             
             self.progress.emit(75)
@@ -65,7 +69,7 @@ class FileProcessor(QThread):
             self.progress.emit(100)
             
             rows, cols = df.shape
-            message = f"File loaded successfully!\nRows: {rows}, Columns: {cols}"
+            message = f"Excel file loaded successfully!\nRows: {rows}, Columns: {cols}\nResults will be appended to this file."
             self.finished.emit(True, message)
             
         except Exception as e:
@@ -162,7 +166,7 @@ class HabibUniversityApp(QMainWindow):
         layout.addLayout(file_layout)
         
         # Supported formats info
-        info = QLabel("Supported: Excel (.xlsx, .xls) and CSV (.csv)")
+        info = QLabel("Supported: Excel (.xlsx, .xls) - Results will be appended to your original file")
         info.setStyleSheet("color: #666; font-size: 12px;")
         layout.addWidget(info)
         
@@ -174,7 +178,7 @@ class HabibUniversityApp(QMainWindow):
         layout.addWidget(self.process_btn)
         
         # Status label
-        self.status_label = QLabel("Ready")
+        self.status_label = QLabel("Ready - Please select an Excel file to begin")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ddd; background: #f5f5f5;")
         layout.addWidget(self.status_label)
@@ -216,9 +220,9 @@ class HabibUniversityApp(QMainWindow):
         """Open file dialog to select a file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
-            "Select File - Habib University",
+            "Select Excel File - Habib University",
             "",
-            "Spreadsheet files (*.xlsx *.xls *.csv);;All files (*.*)"
+            "Excel files (*.xlsx *.xls);;All files (*.*)"
         )
         
         if file_path:
@@ -312,32 +316,33 @@ class HabibUniversityApp(QMainWindow):
         self._cleanup_processor()
     
     def _process_calculation_results(self, message: str):
-            """Process CLO/PLO calculations and create Excel output."""
-            # Extract JSON block from message
-            json_start = message.find("{")
-            if json_start == -1:
-                raise ValueError("No JSON found in output")
+        """Process CLO/PLO calculations and append to original Excel file."""
+        # Extract JSON block from message
+        json_start = message.find("{")
+        if json_start == -1:
+            raise ValueError("No JSON found in output")
 
-            json_data = message[json_start:]
-            data_dict = json.loads(json_data)
+        json_data = message[json_start:]
+        data_dict = json.loads(json_data)
 
-            # Calculate scores
-            clo_scores = calculate_clo_scores(data_dict["clo_assessments"], data_dict["student_scores"])
-            plo_scores = calculate_plo_scores(clo_scores, data_dict["clo_to_plo"])
-            grades = calculate_grades(data_dict["clo_assessments"], data_dict["student_scores"])
-            clo_weights = get_total_clo_weights(data_dict["clo_assessments"])
+        # Calculate scores
+        clo_scores = calculate_clo_scores(data_dict["clo_assessments"], data_dict["student_scores"])
+        plo_scores = calculate_plo_scores(clo_scores, data_dict["clo_to_plo"])
+        grades = calculate_grades(data_dict["clo_assessments"], data_dict["student_scores"])
+        clo_weights = get_total_clo_weights(data_dict["clo_assessments"])
 
-            # Print to terminal
-            self._print_scores_to_console(clo_scores, plo_scores, grades, clo_weights)
+        # Print to terminal
+        self._print_scores_to_console(clo_scores, plo_scores, grades, clo_weights)
 
-            # Create Excel output (now passing grades as parameter)
-            try:
-                output_file = export_clo_plo_results(clo_scores, plo_scores, grades, data_dict)
-                self._update_status(f"CLO/PLO calculation complete. Excel file created: {output_file}", "success")
-                self._show_success_dialog(output_file)
-            except Exception as excel_error:
-                print(f"\n❌ Excel export failed: {excel_error}")
-                self._update_status("CLO/PLO calculation complete. See terminal output. (Excel export failed)", "warning")
+        # Append results to the original Excel file
+        try:
+            # Pass the original file path to the export function
+            updated_file_path = export_clo_plo_results(clo_scores, plo_scores, grades, data_dict, self.current_file_path)
+            self._update_status(f"CLO/PLO calculation complete. Results appended to: {Path(updated_file_path).name}", "success")
+            self._show_success_dialog(updated_file_path)
+        except Exception as excel_error:
+            print(f"\n❌ Excel append failed: {excel_error}")
+            self._update_status("CLO/PLO calculation complete. See terminal output. (Excel append failed)", "warning")
 
     def _print_scores_to_console(self, clo_scores, plo_scores, grades, clo_weights):
         """Print CLO, PLO, Grades, and CLO weights to terminal."""
@@ -363,8 +368,8 @@ class HabibUniversityApp(QMainWindow):
         """Show success dialog with file path."""
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Icon.Information)
-        msg.setWindowTitle("Export Complete")
-        msg.setText(f"Results exported successfully to:\n{output_file}")
+        msg.setWindowTitle("Processing Complete")
+        msg.setText(f"CLO/PLO results have been successfully appended to your original file:\n\n{output_file}\n\nNew sheet added:\n• CLO PLO Results")
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
     
