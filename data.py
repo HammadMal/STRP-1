@@ -56,16 +56,32 @@ def extract_clo_plo_data(df):
     clo_to_plo = {}
     student_scores = {}
 
-    # Fixed CLO description area (rows 2–6)
-    for i in range(2, 7):
-        clo_id = f"CLO {i - 1}"
-        description = df.iloc[i, 1]
-        ldl = df.iloc[i, 2]
-        plo_map = df.iloc[i, 3]
-        if isinstance(plo_map, str) and ";" in plo_map:
-            plo_id, weight = plo_map.split(";")
-            clo_to_plo[clo_id] = {"PLO": f"PLO {plo_id.strip()}", "weight": int(weight)}
-        clos[clo_id] = {"description": description, "LDL": ldl}
+    # Extract ALL CLO definitions from the Excel structure dynamically
+    # This will capture CLOs that are defined in the course but may not have assessments
+    all_defined_clos = {}
+    
+    # Dynamically find CLO definitions instead of hardcoding rows 2-6
+    for i in range(len(df)):
+        if i < len(df):
+            clo_cell = df.iloc[i, 0]
+            if pd.notnull(clo_cell) and str(clo_cell).strip().startswith('CLO'):
+                clo_id = str(clo_cell).strip()
+                description = df.iloc[i, 1] if i < len(df) and len(df.columns) > 1 else ""
+                ldl = df.iloc[i, 2] if i < len(df) and len(df.columns) > 2 else ""
+                plo_map = df.iloc[i, 3] if i < len(df) and len(df.columns) > 3 else ""
+                
+                # Validate that this is actually a CLO row (has proper description)
+                if pd.notnull(description) and str(description).strip() and len(str(description).strip()) > 10:
+                    # Store CLO definition
+                    all_defined_clos[clo_id] = {"description": description, "LDL": ldl}
+                    
+                    # Store PLO mapping if it exists
+                    if isinstance(plo_map, str) and ";" in plo_map:
+                        plo_id, weight = plo_map.split(";")
+                        clo_to_plo[clo_id] = {"PLO": f"PLO {plo_id.strip()}", "weight": int(weight)}
+
+    # Use the comprehensive CLO definitions
+    clos = all_defined_clos
 
     # Dynamically find module/start rows
     module_row, clo_map_row, max_score_row, student_start_row = find_data_rows(df)
@@ -74,7 +90,7 @@ def extract_clo_plo_data(df):
     clo_mapping = df.iloc[clo_map_row, 1:].tolist()
     max_scores = df.iloc[max_score_row, 1:].tolist()
 
-    # Map CLO to assessments
+    # Map CLO to assessments (this might only include CLOs with actual assessments)
     clo_assessments = {}
     for i, (module, mapping, max_score) in enumerate(zip(module_names, clo_mapping, max_scores)):
         if isinstance(mapping, str) and ";" in mapping:
@@ -99,7 +115,6 @@ def extract_clo_plo_data(df):
         module_names[j]: scores[j] for j in range(len(module_names))
         if pd.notnull(scores[j])
     }
-
 
     return clos, clo_to_plo, clo_assessments, student_scores
 

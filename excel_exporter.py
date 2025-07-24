@@ -2,6 +2,7 @@
 Excel Export Module for CLO/PLO Mapping Tool
 Handles creation of formatted Excel reports with student performance data.
 Modified to append results to the original uploaded file instead of creating a new file.
+FIXED: Only shows CLOs that actually exist in the data (no more hardcoded CLO 1-5)
 """
 
 import pandas as pd
@@ -14,6 +15,7 @@ import os
 def create_excel_output(clo_scores, plo_scores, grades, data_dict, original_file_path):
     """
     Append CLO, PLO scores, and final grades to the original Excel file as a new sheet.
+    Only includes CLOs that actually exist in the course structure.
     
     Args:
         clo_scores (dict): Dictionary of CLO scores for each student
@@ -34,38 +36,57 @@ def create_excel_output(clo_scores, plo_scores, grades, data_dict, original_file
     # Prepare data for DataFrame
     data_rows = []
     
-    # Get all unique CLOs and PLOs, ensuring we include all CLOs even if they're 0
-    all_clos = set()
-    all_plos = set()
+    # Get CLOs that are actually defined in the course structure
+    # Use the 'clos' dictionary which contains ALL defined CLOs (even without assessments)
+    defined_clos = set()
+    if 'clos' in data_dict and data_dict['clos']:
+        defined_clos = set(data_dict['clos'].keys())
+        print(f"🔍 CLOs found in course definition: {sorted(defined_clos)}")
+    else:
+        # Fallback: use clo_assessments (only CLOs with actual assessments)
+        if 'clo_assessments' in data_dict and data_dict['clo_assessments']:
+            defined_clos = set(data_dict['clo_assessments'].keys())
+            print(f"⚠️ Using CLOs from assessments (fallback): {sorted(defined_clos)}")
+        else:
+            # Last resort: use what we have in scores
+            for student_clos in clo_scores.values():
+                defined_clos.update(student_clos.keys())
+            print(f"⚠️ Using CLOs from scores (last resort): {sorted(defined_clos)}")
     
-    # First collect from actual scores
-    for student_clos in clo_scores.values():
-        all_clos.update(student_clos.keys())
+    # Get PLOs that are actually mapped in the course
+    defined_plos = set()
+    if 'clo_to_plo' in data_dict and data_dict['clo_to_plo']:
+        for clo_mapping in data_dict['clo_to_plo'].values():
+            if isinstance(clo_mapping, dict) and 'PLO' in clo_mapping:
+                defined_plos.add(clo_mapping['PLO'])
+        print(f"🔍 PLOs found in course mapping: {sorted(defined_plos)}")
+    else:
+        # Fallback: use what we have in scores
+        for student_plos in plo_scores.values():
+            defined_plos.update(student_plos.keys())
+        print(f"⚠️ Using PLOs from scores (fallback): {sorted(defined_plos)}")
     
-    for student_plos in plo_scores.values():
-        all_plos.update(student_plos.keys())
+    # Remove CLO 0 if it exists (bonus points typically excluded from final display)
+    if 'CLO 0' in defined_clos:
+        defined_clos.discard('CLO 0')
+        print(f"📝 Excluding CLO 0 from Excel output (bonus points)")
     
-    # Ensure we always include CLO 1-5 (even if missing from scores) - exclude CLO 0
-    expected_clos = ['CLO 1', 'CLO 2', 'CLO 3', 'CLO 4', 'CLO 5']
-    all_clos.update(expected_clos)
+    # Sort CLOs and PLOs naturally
+    sorted_clos = sorted(defined_clos, key=lambda x: int(x.split()[-1]) if x.split()[-1].isdigit() else 999)
+    sorted_plos = sorted(defined_plos, key=lambda x: int(x.split()[-1]) if x.split()[-1].isdigit() else 999)
     
-    # Remove CLO 0 if it exists in the collected CLOs
-    all_clos.discard('CLO 0')
-    
-    # Sort CLOs and PLOs
-    sorted_clos = sorted(all_clos, key=lambda x: int(x.split()[-1]) if x.split()[-1].isdigit() else 999)
-    sorted_plos = sorted(all_plos, key=lambda x: int(x.split()[-1]) if x.split()[-1].isdigit() else 999)
+    print(f"📊 Final CLOs for Excel: {sorted_clos}")
+    print(f"📊 Final PLOs for Excel: {sorted_plos}")
     
     # Create data rows
     for student_id in clo_scores.keys():
         row_data = {'ID': student_id}
         
-        # Add CLO scores (include CLO 1-5 only, exclude CLO 0)
+        # Add CLO scores - ONLY the ones that are defined in the course
         for clo in sorted_clos:
-            if clo != 'CLO 0':  # Skip CLO 0
-                row_data[clo] = clo_scores[student_id].get(clo, 0)
+            row_data[clo] = clo_scores[student_id].get(clo, 0)
         
-        # Add PLO scores
+        # Add PLO scores - ONLY the ones that are defined in the course
         for plo in sorted_plos:
             row_data[plo] = plo_scores[student_id].get(plo, 0)
         
