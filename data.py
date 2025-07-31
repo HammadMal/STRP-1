@@ -6,7 +6,10 @@ import json
 # === Load Excel ===
 def load_excel(file_path: str):
     try:
-        df = pd.read_excel(file_path, sheet_name='Data', header=None, engine='openpyxl')
+        xlsx = pd.ExcelFile(file_path, engine='openpyxl')
+        sheet_name = 'Data' if 'Data' in xlsx.sheet_names else xlsx.sheet_names[0]
+        df = pd.read_excel(xlsx, sheet_name=sheet_name, header=None)
+
         print("[OK] Loaded Excel file")
         return df
     except Exception as e:
@@ -42,12 +45,13 @@ def find_data_rows(df):
     module_row = None
     for i in range(len(df)):
         cell_val = str(df.iloc[i, 0]).strip().lower()
-        if "module" in cell_val or "modules" in cell_val:
+        if isinstance(cell_val, str) and re.search(r'\bmodule(s)?\b', cell_val, re.IGNORECASE):
             module_row = i
             break
     if module_row is None:
-        raise ValueError("Could not find 'Modules' row in sheet.")
-    
+        print("[!] 'Modules' row not found, trying default fallback row 10")
+        module_row = 10
+
     return module_row, module_row + 1, module_row + 2, module_row + 3
 
 # === Extract CLOs, PLOs, Modules, Scores ===
@@ -56,55 +60,51 @@ def extract_clo_plo_data(df):
     clo_to_plo = {}
     student_scores = {}
 
-    # Extract ALL CLO definitions from the Excel structure dynamically
-    # This will capture CLOs that are defined in the course but may not have assessments
     all_defined_clos = {}
     
-    # Dynamically find CLO definitions instead of hardcoding rows 2-6
     for i in range(len(df)):
-        if i < len(df):
-            clo_cell = df.iloc[i, 0]
-            if pd.notnull(clo_cell) and str(clo_cell).strip().startswith('CLO'):
-                clo_id = str(clo_cell).strip()
-                description = df.iloc[i, 1] if i < len(df) and len(df.columns) > 1 else ""
-                ldl = df.iloc[i, 2] if i < len(df) and len(df.columns) > 2 else ""
-                plo_map = df.iloc[i, 3] if i < len(df) and len(df.columns) > 3 else ""
+        clo_cell = df.iloc[i, 0]
+        if pd.notnull(clo_cell) and str(clo_cell).strip().startswith('CLO'):
+            clo_id = str(clo_cell).strip()
+            description = df.iloc[i, 1] if len(df.columns) > 1 else ""
+            ldl = df.iloc[i, 2] if len(df.columns) > 2 else ""
+            plo_map = df.iloc[i, 3] if len(df.columns) > 3 else ""
+            
+            if pd.notnull(description) and str(description).strip() and len(str(description).strip()) > 10:
+                all_defined_clos[clo_id] = {"description": description, "LDL": ldl}
                 
-                # Validate that this is actually a CLO row (has proper description)
-                if pd.notnull(description) and str(description).strip() and len(str(description).strip()) > 10:
-                    # Store CLO definition
-                    all_defined_clos[clo_id] = {"description": description, "LDL": ldl}
-                    
-                    # Store PLO mapping if it exists
-                    if isinstance(plo_map, str) and ";" in plo_map:
+                if isinstance(plo_map, str) and ";" in plo_map:
+                    try:
                         plo_id, weight = plo_map.split(";")
-                        clo_to_plo[clo_id] = {"PLO": f"PLO {plo_id.strip()}", "weight": int(weight)}
+                        weight = float(weight)  # ✅ float instead of int
+                        clo_to_plo[clo_id] = {"PLO": f"PLO {plo_id.strip()}", "weight": weight}
+                    except Exception as e:
+                        print(f"[!] Failed to parse PLO mapping for {clo_id}: {plo_map} ({e})")
 
-    # Use the comprehensive CLO definitions
     clos = all_defined_clos
 
-    # Dynamically find module/start rows
     module_row, clo_map_row, max_score_row, student_start_row = find_data_rows(df)
 
     module_names = df.iloc[module_row, 1:].tolist()
     clo_mapping = df.iloc[clo_map_row, 1:].tolist()
     max_scores = df.iloc[max_score_row, 1:].tolist()
 
-    # Map CLO to assessments (this might only include CLOs with actual assessments)
     clo_assessments = {}
     for i, (module, mapping, max_score) in enumerate(zip(module_names, clo_mapping, max_scores)):
         if isinstance(mapping, str) and ";" in mapping:
-            clo_index, weight = mapping.split(";")
-            clo_id = f"CLO {clo_index.strip()}"
-            if clo_id not in clo_assessments:
-                clo_assessments[clo_id] = []
-            clo_assessments[clo_id].append({
-                "module": module,
-                "max_score": float(max_score),
-                "weight": float(weight)
-            })
+            try:
+                clo_index, weight = mapping.split(";")
+                clo_id = f"CLO {clo_index.strip()}"
+                if clo_id not in clo_assessments:
+                    clo_assessments[clo_id] = []
+                clo_assessments[clo_id].append({
+                    "module": module,
+                    "max_score": float(max_score),  # ✅ now handles 15.0 or 12.5
+                    "weight": float(weight)         # ✅ supports weights like 10.5
+                })
+            except Exception as e:
+                print(f"[!] Failed to parse CLO assessment mapping: {mapping} ({e})")
 
-    # Extract student scores
     for i in range(student_start_row, df.shape[0]):
         student_id_raw = df.iloc[i, 0]
         if pd.isnull(student_id_raw):
@@ -112,9 +112,9 @@ def extract_clo_plo_data(df):
         student_id = str(student_id_raw).strip() 
         scores = df.iloc[i, 1:].tolist()
         student_scores[student_id] = {
-        module_names[j]: scores[j] for j in range(len(module_names))
-        if pd.notnull(scores[j])
-    }
+            module_names[j]: scores[j] for j in range(len(module_names))
+            if pd.notnull(scores[j])
+        }
 
     return clos, clo_to_plo, clo_assessments, student_scores
 
@@ -142,7 +142,6 @@ def preprocess_excel_and_extract(file_path):
         "student_scores": student_scores
     }, indent=2))
 
-
 # === Run if executed directly ===
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -150,6 +149,3 @@ if __name__ == "__main__":
     else:
         file_path = "example_file.xlsx"  # fallback
     preprocess_excel_and_extract(file_path)
-
-
-# returns marks/clo/plo in dictionary form
