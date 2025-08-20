@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Habib University CLO/PLO Mapping UI - Enhanced with Batch Processing
+Habib University CLO/PLO Mapping UI - Enhanced with Batch Processing and Student ID Validation
 A PyQt6 application for file management, processing, and Excel report generation.
-Now supports both single file and folder (batch) processing.
+Now supports both single file and folder (batch) processing with student ID validation.
 """
 
 import sys
@@ -171,7 +171,8 @@ class BatchDataProcessor(QThread):
                         capture_output=True,
                         text=True,
                         check=True,
-                        encoding='utf-8'
+                        encoding='utf-8',
+                        errors='replace'  # Handle encoding errors gracefully
                     )
                     
                     output = result.stdout if result.stdout else "Processing completed successfully"
@@ -181,20 +182,29 @@ class BatchDataProcessor(QThread):
                         file_results = self._process_single_file_results(output, file_path)
                         results_summary[file_name] = file_results
                         successful_files.append(file_name)
-                        self.file_completed.emit(file_name, True, f"✅ Processed successfully")
+                        self.file_completed.emit(file_name, True, f"Processed successfully")
                         
                     except Exception as calc_error:
                         failed_files.append(file_name)
-                        self.file_completed.emit(file_name, False, f"❌ Calculation failed: {str(calc_error)}")
+                        # Check if it's a student ID validation error
+                        if "Invalid student ID format" in str(calc_error):
+                            self.file_completed.emit(file_name, False, f"Invalid student ID format")
+                        else:
+                            self.file_completed.emit(file_name, False, f"Calculation failed: {str(calc_error)}")
                 
                 except subprocess.CalledProcessError as e:
                     error_msg = e.stderr if e.stderr else str(e)
                     failed_files.append(file_name)
-                    self.file_completed.emit(file_name, False, f"❌ Processing failed: {error_msg}")
+                    
+                    # Check if it's a student ID validation error
+                    if "Invalid student ID format" in error_msg:
+                        self.file_completed.emit(file_name, False, f"Invalid student ID format - check file")
+                    else:
+                        self.file_completed.emit(file_name, False, f"Processing failed: {error_msg}")
                 
                 except Exception as e:
                     failed_files.append(file_name)
-                    self.file_completed.emit(file_name, False, f"❌ Unexpected error: {str(e)}")
+                    self.file_completed.emit(file_name, False, f"Unexpected error: {str(e)}")
                 
                 # Update overall progress
                 progress = int(((i + 1) / total_files) * 100)
@@ -202,16 +212,16 @@ class BatchDataProcessor(QThread):
             
             # Compile final summary
             summary_message = f"""
-📊 Batch Processing Complete!
+Batch Processing Complete!
 
-✅ Successfully processed: {len(successful_files)} files
-❌ Failed: {len(failed_files)} files
+Successfully processed: {len(successful_files)} files
+Failed: {len(failed_files)} files
 
 Successful files:
-""" + "\n".join([f"• {f}" for f in successful_files])
+""" + "\n".join([f"- {f}" for f in successful_files])
             
             if failed_files:
-                summary_message += f"\n\nFailed files:\n" + "\n".join([f"• {f}" for f in failed_files])
+                summary_message += f"\n\nFailed files:\n" + "\n".join([f"- {f}" for f in failed_files])
             
             self.finished.emit(True, summary_message, results_summary)
             
@@ -237,30 +247,30 @@ Successful files:
         # Print to terminal for this file
         file_name = Path(file_path).name
         print(f"\n{'='*50}")
-        print(f"📁 Results for: {file_name}")
+        print(f"Results for: {file_name}")
         print(f"{'='*50}")
         
-        print("\n🎯 CLO Scores:")
+        print("\nCLO Scores:")
         for student, scores in clo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\n📊 PLO Scores:")
+        print("\nPLO Scores:")
         for student, scores in plo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\n🧮 Final Grades:")
+        print("\nFinal Grades:")
         for student, percent in grades.items():
             letter = get_letter_grade(percent)
             print(f"{student}: {percent:.2f}% ({letter})")
 
-        print("\n📌 Total CLO Weights:")
+        print("\nTotal CLO Weights:")
         for clo, weight in clo_weights.items():
             print(f"{clo}: {weight} %")
 
         # Append results to the original Excel file
         try:
             updated_file_path = export_clo_plo_results(clo_scores, plo_scores, grades, data_dict, file_path)
-            print(f"✅ Results appended to: {updated_file_path}")
+            print(f"Results appended to: {updated_file_path}")
             
             return {
                 "students_count": len(clo_scores),
@@ -270,7 +280,7 @@ Successful files:
             }
             
         except Exception as excel_error:
-            print(f"\n❌ Excel append failed for {file_name}: {excel_error}")
+            print(f"\nExcel append failed for {file_name}: {excel_error}")
             return {
                 "students_count": len(clo_scores),
                 "clo_count": len(set().union(*[scores.keys() for scores in clo_scores.values()])),
@@ -307,7 +317,8 @@ class DataProcessor(QThread):
                 capture_output=True,
                 text=True,
                 check=True,
-                encoding='utf-8'
+                encoding='utf-8',
+                errors='replace'  # Handle encoding errors gracefully
             )
             
             # Extract output
@@ -323,7 +334,7 @@ class DataProcessor(QThread):
 
 
 class HabibUniversityApp(QMainWindow):
-    """Main application window with enhanced batch processing capabilities."""
+    """Main application window with enhanced batch processing capabilities and student ID validation."""
     
     def __init__(self):
         super().__init__()
@@ -341,7 +352,7 @@ class HabibUniversityApp(QMainWindow):
     
     def init_ui(self):
         """Initialize the enhanced user interface."""
-        self.setWindowTitle("Habib University - CLO/PLO Mapping (Enhanced)")
+        self.setWindowTitle("Habib University - CLO/PLO Mapping (Enhanced with ID Validation)")
         self.setMinimumSize(700, 500)
         self.resize(800, 600)
         
@@ -360,6 +371,12 @@ class HabibUniversityApp(QMainWindow):
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+        
+        # Student ID format info
+        id_info = QLabel("📧 Student IDs must be in format: hm08298@st.habib.edu.pk or hm08298")
+        id_info.setStyleSheet("color: #666; font-size: 12px; padding: 8px; background: #f8f9fa; border-radius: 4px;")
+        id_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(id_info)
         
         # Enhanced file selection section
         file_layout = QVBoxLayout()
@@ -642,12 +659,17 @@ class HabibUniversityApp(QMainWindow):
         self.batch_data_processor.start()
     
     def on_data_processed(self, success: bool, message: str):
-        """Handle single file data processing completion."""
+        """Handle single file data processing completion with enhanced error handling."""
         # Re-enable buttons
         self._set_buttons_enabled(True)
         
         if not success:
-            self._update_status(f"Processing failed: {message}", "error")
+            # Check if it's a student ID validation error
+            if "Invalid student ID format" in message:
+                self._show_student_id_error_dialog(message)
+                self._update_status("Student ID validation failed - check format", "error")
+            else:
+                self._update_status(f"Processing failed: {message}", "error")
             self._cleanup_single_processor()
             return
         
@@ -660,7 +682,11 @@ class HabibUniversityApp(QMainWindow):
         try:
             self._process_calculation_results(message)
         except Exception as e:
-            self._update_status(f"Calculation failed: {str(e)}", "error")
+            if "Invalid student ID format" in str(e):
+                self._show_student_id_error_dialog(str(e))
+                self._update_status("Student ID validation failed", "error")
+            else:
+                self._update_status(f"Calculation failed: {str(e)}", "error")
         
         self._cleanup_single_processor()
     
@@ -683,7 +709,7 @@ class HabibUniversityApp(QMainWindow):
             self.batch_progress_label.setText(f"❌ Batch processing failed: {message}")
         
         print("\n" + "="*60)
-        print("📊 BATCH PROCESSING SUMMARY")
+        print("BATCH PROCESSING SUMMARY")
         print("="*60)
         print(message)
         
@@ -719,20 +745,20 @@ class HabibUniversityApp(QMainWindow):
 
     def _print_scores_to_console(self, clo_scores, plo_scores, grades, clo_weights):
         """Print CLO, PLO, Grades, and CLO weights to terminal."""
-        print("\n🎯 CLO Scores:")
+        print("\nCLO Scores:")
         for student, scores in clo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\n📊 PLO Scores:")
+        print("\nPLO Scores:")
         for student, scores in plo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\n🧮 Final Grades:")
+        print("\nFinal Grades:")
         for student, percent in grades.items():
             letter = get_letter_grade(percent)
             print(f"{student}: {percent:.2f}% ({letter})")
 
-        print("\n📌 Total CLO Weights:")
+        print("\nTotal CLO Weights:")
         for clo, weight in clo_weights.items():
             print(f"{clo}: {weight} %")
     
@@ -742,7 +768,11 @@ class HabibUniversityApp(QMainWindow):
         if success:
             result_label.setStyleSheet("color: #28a745; padding: 4px;")
         else:
-            result_label.setStyleSheet("color: #dc3545; padding: 4px;")
+            # Highlight student ID errors differently
+            if "Invalid student ID format" in message:
+                result_label.setStyleSheet("color: #e74c3c; padding: 4px; font-weight: bold;")
+            else:
+                result_label.setStyleSheet("color: #dc3545; padding: 4px;")
         self.batch_results_layout.addWidget(result_label)
     
     def _clear_batch_results(self):
@@ -769,7 +799,7 @@ class HabibUniversityApp(QMainWindow):
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Icon.Information)
         msg.setWindowTitle("Processing Complete")
-        msg.setText(f"CLO/PLO results have been successfully appended to your file:\n\n{output_file}\n\nNew sheet added:\n• CLO PLO Results")
+        msg.setText(f"CLO/PLO results have been successfully appended to your file:\n\n{output_file}\n\nNew sheet added:\n• CLO PLO Results\n\n📧 All student IDs formatted to Habib University email format")
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
     
@@ -785,11 +815,44 @@ class HabibUniversityApp(QMainWindow):
         dialog_text = f"Batch processing completed!\n\n"
         dialog_text += f"✅ Successfully processed: {successful_count}/{total_count} files\n\n"
         dialog_text += "Each successfully processed file now contains:\n"
-        dialog_text += "• CLO PLO Results sheet with color-coded performance data\n\n"
+        dialog_text += "• CLO PLO Results sheet with color-coded performance data\n"
+        dialog_text += "• Student IDs formatted to Habib University email format\n\n"
         dialog_text += "Check the Batch Progress tab and terminal output for detailed results."
         
         msg.setText(dialog_text)
         msg.setDetailedText(summary_message)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+    
+    def _show_student_id_error_dialog(self, error_message: str):
+        """Show detailed error dialog for student ID validation issues."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Student ID Format Error")
+        
+        # Create a user-friendly message
+        dialog_text = """❌ Student ID Format Error Detected
+
+The Excel file contains student IDs that don't match the required Habib University format.
+
+📧 Required Format:
+• hm08298@st.habib.edu.pk (full email format)
+• hm08298 (short format - will be auto-converted)
+
+✅ Valid Examples:
+• ab12345 (any 2 letters + 5 digits)
+• xy67890@st.habib.edu.pk
+• hm08298
+
+❌ Invalid Examples:
+• 12345 (missing initials)
+• abc123 (wrong number of digits)
+• hm123456 (too many digits)
+
+Please fix the student IDs in your Excel file and try again."""
+        
+        msg.setText(dialog_text)
+        msg.setDetailedText(error_message)
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
     
@@ -839,7 +902,7 @@ class HabibUniversityApp(QMainWindow):
 def main():
     """Main application entry point."""
     app = QApplication(sys.argv)
-    app.setApplicationName("Habib University CLO/PLO Mapping Tool - Enhanced")
+    app.setApplicationName("Habib University CLO/PLO Mapping Tool - Enhanced with ID Validation")
     app.setStyle("Fusion")
     
     window = HabibUniversityApp()
