@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Habib University CLO/PLO Mapping UI - Enhanced with Batch Processing and Student ID Validation
+Habib University CLO/PLO Mapping UI - Enhanced with Batch Processing, Student ID Validation, and Filename Validation
 A PyQt6 application for file management, processing, and Excel report generation.
-Now supports both single file and folder (batch) processing with student ID validation.
+Now supports filename validation according to Habib University naming conventions.
 """
 
 import sys
@@ -21,6 +21,16 @@ from clo_plo_calculator import (
 )
 from excel_exporter import export_clo_plo_results
 
+# Import our new filename validation module
+from filename_validator import (
+    validate_filename_format,
+    validate_batch_filenames,
+    get_filename_format_help,
+    format_validation_summary,
+    extract_course_info,
+    FilenameValidationError
+)
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QMessageBox, QProgressBar,
@@ -30,7 +40,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 
 class BatchFileProcessor(QThread):
-    """Background thread for processing multiple files in a folder."""
+    """Background thread for processing multiple files in a folder with filename validation."""
     
     finished = pyqtSignal(bool, str, list)  # success, message, processed_files
     progress = pyqtSignal(int)  # progress percentage
@@ -41,7 +51,7 @@ class BatchFileProcessor(QThread):
         self.folder_path = folder_path
         
     def run(self):
-        """Process all Excel files in the selected folder."""
+        """Process all Excel files in the selected folder with filename validation."""
         try:
             # Find all Excel files in folder
             excel_files = []
@@ -54,41 +64,96 @@ class BatchFileProcessor(QThread):
                 self.finished.emit(False, "No Excel files found in the selected folder", [])
                 return
             
-            valid_files = []
+            # Convert to string paths for validation
+            file_paths = [str(f) for f in excel_files]
             
-            # Validate each file
-            for i, file_path in enumerate(excel_files):
-                self.file_progress.emit(f"Validating: {file_path.name}")
+            # Validate filenames first
+            self.file_progress.emit("Validating filenames...")
+            valid_files, invalid_files, validation_results = validate_batch_filenames(file_paths)
+            
+            # Update progress after filename validation
+            self.progress.emit(25)
+            
+            # If no files have valid names, stop here
+            if not valid_files:
+                error_message = "❌ No files with valid filename format found!\n\n"
+                error_message += format_validation_summary(0, len(invalid_files), validation_results)
+                self.finished.emit(False, error_message, [])
+                return
+            
+            # If some files have invalid names, show warning but continue with valid ones
+            if invalid_files:
+                print("\n⚠️ FILENAME VALIDATION WARNINGS:")
+                print("=" * 50)
+                for invalid_file in invalid_files:
+                    filename = os.path.basename(invalid_file)
+                    print(f"❌ {filename}: {validation_results[filename]}")
+                print("\n📋 Continuing with valid files only...")
+                print("=" * 50)
+            
+            # Now validate file content for valid-named files
+            content_valid_files = []
+            
+            for i, file_path in enumerate(valid_files):
+                filename = os.path.basename(file_path)
+                self.file_progress.emit(f"Validating content: {filename}")
                 
                 try:
                     # Quick validation - try to read the file
                     df = pd.read_excel(file_path, nrows=5)  # Just read first 5 rows for validation
                     if not df.empty:
-                        valid_files.append(str(file_path))
+                        content_valid_files.append(file_path)
+                        print(f"✅ {filename}: Valid filename and content")
                     
                 except Exception as e:
-                    print(f"⚠️ Skipping {file_path.name}: {e}")
+                    print(f"⚠️ {filename}: Valid filename but content error - {e}")
                 
-                # Update progress
-                progress = int(((i + 1) / len(excel_files)) * 100)
-                self.progress.emit(progress)
+                # Update progress during content validation
+                content_progress = 25 + int(((i + 1) / len(valid_files)) * 75)
+                self.progress.emit(content_progress)
             
-            if not valid_files:
-                self.finished.emit(False, "No valid Excel files found in the folder", [])
+            if not content_valid_files:
+                self.finished.emit(False, "No files with valid content found (filename validation passed)", [])
                 return
             
-            message = f"Found {len(valid_files)} valid Excel files ready for processing:\n"
-            for file_path in valid_files:
-                message += f"• {Path(file_path).name}\n"
+            # Create success message
+            message = f"✅ Found {len(content_valid_files)} files ready for processing:\n\n"
             
-            self.finished.emit(True, message, valid_files)
+            # Group files by course for better organization
+            course_groups = {}
+            for file_path in content_valid_files:
+                try:
+                    filename = os.path.basename(file_path)
+                    course_info = extract_course_info(filename)
+                    course_key = course_info["full_course_code"]
+                    
+                    if course_key not in course_groups:
+                        course_groups[course_key] = []
+                    course_groups[course_key].append((filename, course_info))
+                    
+                except Exception as e:
+                    print(f"⚠️ Error extracting course info from {filename}: {e}")
+            
+            # Display organized by course
+            for course_code, file_list in course_groups.items():
+                message += f"📚 {course_code}:\n"
+                for filename, course_info in file_list:
+                    message += f"  • {filename} (Section {course_info['section']})\n"
+                message += "\n"
+            
+            # Add filename validation summary if there were issues
+            if invalid_files:
+                message += f"⚠️ Note: {len(invalid_files)} files skipped due to invalid filename format.\n"
+                message += "Check console output for details.\n\n"
+            
+            self.finished.emit(True, message, content_valid_files)
             
         except Exception as e:
             self.finished.emit(False, f"Error processing folder: {str(e)}", [])
 
 
 class FileProcessor(QThread):
-    """Background thread for processing files."""
+    """Background thread for processing files with filename validation."""
     
     finished = pyqtSignal(bool, str)  # success, message
     progress = pyqtSignal(int)  # progress percentage
@@ -98,8 +163,27 @@ class FileProcessor(QThread):
         self.file_path = file_path
         
     def run(self):
-        """Process the uploaded file."""
+        """Process the uploaded file with filename validation."""
         try:
+            filename = os.path.basename(self.file_path)
+            
+            # First validate filename format
+            self.progress.emit(10)
+            is_valid_name, name_message, components = validate_filename_format(filename)
+            
+            if not is_valid_name:
+                error_message = f"❌ Invalid filename format!\n\n{name_message}\n\n"
+                error_message += get_filename_format_help()
+                self.finished.emit(False, error_message)
+                return
+            
+            # Extract course information for display
+            try:
+                course_info = extract_course_info(filename)
+                print(f"📚 Course Info: {course_info['display_name']}")
+            except:
+                pass  # Don't fail if course info extraction fails
+            
             self.progress.emit(25)
             
             file_ext = Path(self.file_path).suffix.lower()
@@ -127,7 +211,19 @@ class FileProcessor(QThread):
             self.progress.emit(100)
             
             rows, cols = df.shape
-            message = f"Excel file loaded successfully!\nRows: {rows}, Columns: {cols}\nResults will be appended to this file."
+            message = f"✅ File validation successful!\n\n"
+            message += f"📂 Filename: {filename}\n"
+            message += f"📊 Content: {rows} rows, {cols} columns\n"
+            
+            # Add course info if available
+            try:
+                course_info = extract_course_info(filename)
+                message += f"📚 Course: {course_info['display_name']}\n"
+            except:
+                pass
+            
+            message += f"\n✏️ Results will be appended to this file after processing."
+            
             self.finished.emit(True, message)
             
         except Exception as e:
@@ -162,7 +258,14 @@ class BatchDataProcessor(QThread):
             
             for i, file_path in enumerate(self.file_paths):
                 file_name = Path(file_path).name
-                self.file_progress.emit(f"Processing: {file_name}")
+                
+                # Show course info during processing
+                try:
+                    course_info = extract_course_info(file_name)
+                    display_text = f"Processing: {course_info['full_course_code']} Section {course_info['section']}"
+                    self.file_progress.emit(display_text)
+                except:
+                    self.file_progress.emit(f"Processing: {file_name}")
                 
                 try:
                     # Process individual file
@@ -210,18 +313,42 @@ class BatchDataProcessor(QThread):
                 progress = int(((i + 1) / total_files) * 100)
                 self.progress.emit(progress)
             
-            # Compile final summary
+            # Compile final summary with course organization
             summary_message = f"""
-Batch Processing Complete!
+📊 Batch Processing Complete!
 
-Successfully processed: {len(successful_files)} files
-Failed: {len(failed_files)} files
+✅ Successfully processed: {len(successful_files)} files
+❌ Failed: {len(failed_files)} files
 
-Successful files:
-""" + "\n".join([f"- {f}" for f in successful_files])
+"""
+            
+            # Organize successful files by course
+            if successful_files:
+                course_groups = {}
+                for filename in successful_files:
+                    try:
+                        course_info = extract_course_info(filename)
+                        course_key = course_info["full_course_code"]
+                        if course_key not in course_groups:
+                            course_groups[course_key] = []
+                        course_groups[course_key].append(f"{filename} (Section {course_info['section']})")
+                    except:
+                        # Fallback if course info extraction fails
+                        if "Other" not in course_groups:
+                            course_groups["Other"] = []
+                        course_groups["Other"].append(filename)
+                
+                summary_message += "✅ Successful files:\n"
+                for course_code, file_list in course_groups.items():
+                    summary_message += f"📚 {course_code}:\n"
+                    for file_desc in file_list:
+                        summary_message += f"  • {file_desc}\n"
+                    summary_message += "\n"
             
             if failed_files:
-                summary_message += f"\n\nFailed files:\n" + "\n".join([f"- {f}" for f in failed_files])
+                summary_message += f"❌ Failed files:\n"
+                for filename in failed_files:
+                    summary_message += f"  • {filename}\n"
             
             self.finished.emit(True, summary_message, results_summary)
             
@@ -247,30 +374,38 @@ Successful files:
         # Print to terminal for this file
         file_name = Path(file_path).name
         print(f"\n{'='*50}")
-        print(f"Results for: {file_name}")
+        print(f"📁 Results for: {file_name}")
+        
+        # Add course information
+        try:
+            course_info = extract_course_info(file_name)
+            print(f"📚 Course: {course_info['display_name']}")
+        except:
+            pass
+        
         print(f"{'='*50}")
         
-        print("\nCLO Scores:")
+        print("\n🎯 CLO Scores:")
         for student, scores in clo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\nPLO Scores:")
+        print("\n📊 PLO Scores:")
         for student, scores in plo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\nFinal Grades:")
+        print("\n🧮 Final Grades:")
         for student, percent in grades.items():
             letter = get_letter_grade(percent)
             print(f"{student}: {percent:.2f}% ({letter})")
 
-        print("\nTotal CLO Weights:")
+        print("\n📌 Total CLO Weights:")
         for clo, weight in clo_weights.items():
             print(f"{clo}: {weight} %")
 
         # Append results to the original Excel file
         try:
             updated_file_path = export_clo_plo_results(clo_scores, plo_scores, grades, data_dict, file_path)
-            print(f"Results appended to: {updated_file_path}")
+            print(f"✅ Results appended to: {updated_file_path}")
             
             return {
                 "students_count": len(clo_scores),
@@ -280,7 +415,7 @@ Successful files:
             }
             
         except Exception as excel_error:
-            print(f"\nExcel append failed for {file_name}: {excel_error}")
+            print(f"\n❌ Excel append failed for {file_name}: {excel_error}")
             return {
                 "students_count": len(clo_scores),
                 "clo_count": len(set().union(*[scores.keys() for scores in clo_scores.values()])),
@@ -334,7 +469,7 @@ class DataProcessor(QThread):
 
 
 class HabibUniversityApp(QMainWindow):
-    """Main application window with enhanced batch processing capabilities and student ID validation."""
+    """Main application window with enhanced batch processing capabilities, student ID validation, and filename validation."""
     
     def __init__(self):
         super().__init__()
@@ -351,10 +486,10 @@ class HabibUniversityApp(QMainWindow):
         self.init_ui()
     
     def init_ui(self):
-        """Initialize the enhanced user interface."""
-        self.setWindowTitle("Habib University - CLO/PLO Mapping (Enhanced with ID Validation)")
-        self.setMinimumSize(700, 500)
-        self.resize(800, 600)
+        """Initialize the enhanced user interface with filename validation info."""
+        self.setWindowTitle("Habib University - CLO/PLO Mapping (Enhanced with Filename & ID Validation)")
+        self.setMinimumSize(700, 550)
+        self.resize(800, 650)
         
         # Create central widget
         central_widget = QWidget()
@@ -363,8 +498,8 @@ class HabibUniversityApp(QMainWindow):
         
         # Main layout
         layout = QVBoxLayout(central_widget)
-        layout.setSpacing(20)
-        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 25, 30, 30)
         
         # Title
         title = QLabel("Habib University CLO/PLO Mapping Tool")
@@ -372,9 +507,15 @@ class HabibUniversityApp(QMainWindow):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
         
+        # Filename format info
+        filename_info = QLabel("📂 Filename Format: XXXX-XX-XXX-XX.xlsx (e.g., 2515-EE-437-L1.xlsx)")
+        filename_info.setStyleSheet("color: #d63384; font-size: 12px; font-weight: bold; padding: 8px; background: #f8d7da; border-radius: 4px; border: 1px solid #f5c2c7;")
+        filename_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(filename_info)
+        
         # Student ID format info
-        id_info = QLabel("📧 Student IDs must be in format: hm08298@st.habib.edu.pk or hm08298")
-        id_info.setStyleSheet("color: #666; font-size: 12px; padding: 8px; background: #f8f9fa; border-radius: 4px;")
+        id_info = QLabel("📧 Student IDs: hm08298@st.habib.edu.pk or hm08298 (auto-converted)")
+        id_info.setStyleSheet("color: #666; font-size: 12px; padding: 6px; background: #f8f9fa; border-radius: 4px;")
         id_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(id_info)
         
@@ -392,20 +533,26 @@ class HabibUniversityApp(QMainWindow):
         self.browse_folder_btn.clicked.connect(self.browse_folder)
         self.browse_folder_btn.setStyleSheet(self._get_button_style())
         
+        # Help button for filename format
+        self.help_btn = QPushButton("❓ Filename Help")
+        self.help_btn.clicked.connect(self.show_filename_help)
+        self.help_btn.setStyleSheet(self._get_help_button_style())
+        
         button_layout.addWidget(self.browse_file_btn)
         button_layout.addWidget(self.browse_folder_btn)
+        button_layout.addWidget(self.help_btn)
         file_layout.addLayout(button_layout)
         
         # File/folder display
         self.file_label = QLabel("No files selected")
-        self.file_label.setStyleSheet("padding: 12px; border: 1px solid #ccc; background: #f9f9f9; min-height: 60px;")
+        self.file_label.setStyleSheet("padding: 12px; border: 1px solid #ccc; background: #f9f9f9; min-height: 80px;")
         self.file_label.setWordWrap(True)
         file_layout.addWidget(self.file_label)
         
         layout.addLayout(file_layout)
         
         # Supported formats info
-        info = QLabel("Supported: Excel (.xlsx, .xls) - Results will be appended to original files")
+        info = QLabel("✅ Excel (.xlsx, .xls) with valid filename format - Results appended to original files")
         info.setStyleSheet("color: #666; font-size: 12px;")
         layout.addWidget(info)
         
@@ -423,7 +570,7 @@ class HabibUniversityApp(QMainWindow):
         status_widget = QWidget()
         status_layout = QVBoxLayout(status_widget)
         
-        self.status_label = QLabel("Ready - Please select Excel file(s) to begin")
+        self.status_label = QLabel("Ready - Please select Excel file(s) with valid filename format")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setStyleSheet("padding: 12px; border: 1px solid #ddd; background: #f5f5f5;")
         status_layout.addWidget(self.status_label)
@@ -484,25 +631,70 @@ class HabibUniversityApp(QMainWindow):
             }
         """
     
+    def _get_help_button_style(self):
+        """Get help button styling."""
+        return """
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 16px;
+                font-weight: bold;
+                min-height: 30px;
+                font-size: 14px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+            QPushButton:pressed {
+                background-color: #0e6674;
+            }
+        """
+    
+    def show_filename_help(self):
+        """Show filename format help dialog."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Filename Format Requirements")
+        
+        help_text = get_filename_format_help()
+        msg.setText("📋 Habib University Excel File Naming Convention")
+        msg.setDetailedText(help_text)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        
+        # Make the dialog larger to show the detailed text properly
+        msg.setStyleSheet("QMessageBox { min-width: 600px; }")
+        msg.exec()
+    
     def browse_single_file(self):
-        """Open file dialog to select a single file."""
+        """Open file dialog to select a single file with filename validation."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
-            "Select Excel File - Habib University",
+            "Select Excel File - Habib University (Format: XXXX-XX-XXX-XX.xlsx)",
             "",
             "Excel files (*.xlsx *.xls);;All files (*.*)"
         )
         
         if file_path:
+            # Quick filename validation before proceeding
+            filename = os.path.basename(file_path)
+            is_valid, message, components = validate_filename_format(filename)
+            
+            if not is_valid:
+                self._show_filename_error_dialog(filename, message)
+                return
+            
             self.processing_mode = "single"
             self.current_file_paths = [file_path]
             self.load_file(file_path)
     
     def browse_folder(self):
-        """Open folder dialog to select a folder for batch processing."""
+        """Open folder dialog to select a folder for batch processing with filename validation."""
         folder_path = QFileDialog.getExistingDirectory(
             self,
-            "Select Folder with Excel Files - Habib University",
+            "Select Folder with Excel Files - Habib University (Format: XXXX-XX-XXX-XX.xlsx)",
             ""
         )
         
@@ -510,14 +702,30 @@ class HabibUniversityApp(QMainWindow):
             self.processing_mode = "batch"
             self.load_folder(folder_path)
     
+    def _show_filename_error_dialog(self, filename: str, error_message: str):
+        """Show detailed error dialog for filename validation issues."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Invalid Filename Format")
+        
+        dialog_text = f"❌ Filename Format Error\n\n"
+        dialog_text += f"📂 File: {filename}\n"
+        dialog_text += f"🚫 Issue: {error_message}\n\n"
+        dialog_text += "Please rename your file according to the Habib University naming convention and try again."
+        
+        msg.setText(dialog_text)
+        msg.setDetailedText(get_filename_format_help())
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+    
     def load_file(self, file_path: str):
-        """Load and process a single selected file."""
+        """Load and process a single selected file with filename validation."""
         self.current_file_path = file_path
         file_name = Path(file_path).name
         
         # Update UI
         self.file_label.setText(f"📄 Single File Mode\nSelected: {file_name}")
-        self._update_status("Processing file...", "processing")
+        self._update_status("Validating file format and content...", "processing")
         
         # Show progress bar
         self.progress_bar.setVisible(True)
@@ -526,19 +734,19 @@ class HabibUniversityApp(QMainWindow):
         # Disable buttons
         self._set_buttons_enabled(False)
         
-        # Start processing
+        # Start processing with filename validation
         self.file_processor = FileProcessor(file_path)
         self.file_processor.finished.connect(self.on_file_processed)
         self.file_processor.progress.connect(self.progress_bar.setValue)
         self.file_processor.start()
     
     def load_folder(self, folder_path: str):
-        """Load and validate all Excel files in the selected folder."""
+        """Load and validate all Excel files in the selected folder with filename validation."""
         folder_name = Path(folder_path).name
         
         # Update UI
         self.file_label.setText(f"📁 Batch Mode\nScanning folder: {folder_name}")
-        self._update_status("Scanning folder for Excel files...", "processing")
+        self._update_status("Scanning folder and validating filenames...", "processing")
         
         # Show progress bar
         self.progress_bar.setVisible(True)
@@ -546,7 +754,7 @@ class HabibUniversityApp(QMainWindow):
         
         # Switch to batch progress tab
         self.status_tabs.setCurrentIndex(1)
-        self.batch_progress_label.setText("Scanning folder for Excel files...")
+        self.batch_progress_label.setText("Scanning folder and validating filenames...")
         
         # Clear previous batch results
         self._clear_batch_results()
@@ -554,7 +762,7 @@ class HabibUniversityApp(QMainWindow):
         # Disable buttons
         self._set_buttons_enabled(False)
         
-        # Start batch file processing
+        # Start batch file processing with filename validation
         self.batch_file_processor = BatchFileProcessor(folder_path)
         self.batch_file_processor.finished.connect(self.on_batch_files_processed)
         self.batch_file_processor.progress.connect(self.progress_bar.setValue)
@@ -562,7 +770,7 @@ class HabibUniversityApp(QMainWindow):
         self.batch_file_processor.start()
     
     def on_file_processed(self, success: bool, message: str):
-        """Handle single file processing completion."""
+        """Handle single file processing completion with filename validation."""
         # Hide progress bar
         self.progress_bar.setVisible(False)
         
@@ -573,7 +781,11 @@ class HabibUniversityApp(QMainWindow):
         if success:
             self._update_status(message, "success")
         else:
-            self._update_status(f"Error: {message}", "error")
+            # Check if it's a filename validation error
+            if "Invalid filename format" in message:
+                self._update_status("❌ Filename validation failed - check format", "error")
+            else:
+                self._update_status(f"Error: {message}", "error")
         
         # Clean up
         if self.file_processor:
@@ -581,7 +793,7 @@ class HabibUniversityApp(QMainWindow):
             self.file_processor = None
     
     def on_batch_files_processed(self, success: bool, message: str, file_paths: List[str]):
-        """Handle batch file validation completion."""
+        """Handle batch file validation completion with filename validation."""
         # Hide progress bar
         self.progress_bar.setVisible(False)
         
@@ -591,17 +803,42 @@ class HabibUniversityApp(QMainWindow):
         if success and file_paths:
             self.current_file_paths = file_paths
             
-            # Update file display
-            file_list = "\n".join([f"• {Path(f).name}" for f in file_paths[:10]])
-            if len(file_paths) > 10:
-                file_list += f"\n... and {len(file_paths) - 10} more files"
+            # Update file display with course information
+            file_list = ""
+            course_count = {}
             
-            self.file_label.setText(f"📁 Batch Mode\nFound {len(file_paths)} valid Excel files:\n{file_list}")
-            self._update_status(f"Ready to process {len(file_paths)} Excel files", "success")
+            for file_path in file_paths[:10]:  # Show first 10 files
+                filename = Path(file_path).name
+                try:
+                    course_info = extract_course_info(filename)
+                    course_key = course_info["full_course_code"]
+                    
+                    if course_key not in course_count:
+                        course_count[course_key] = 0
+                    course_count[course_key] += 1
+                    
+                    file_list += f"• {filename} ({course_info['full_course_code']} - Section {course_info['section']})\n"
+                except:
+                    file_list += f"• {filename}\n"
+            
+            if len(file_paths) > 10:
+                file_list += f"... and {len(file_paths) - 10} more files\n"
+            
+            # Add course summary
+            course_summary = "\n📚 Courses found:\n"
+            for course, count in course_count.items():
+                course_summary += f"  {course}: {count} section(s)\n"
+            
+            self.file_label.setText(f"📁 Batch Mode\n✅ Found {len(file_paths)} valid Excel files:\n{file_list}{course_summary}")
+            self._update_status(f"Ready to process {len(file_paths)} Excel files with valid filenames", "success")
             self.batch_progress_label.setText(f"Ready to process {len(file_paths)} files")
             
         else:
-            self._update_status(f"Error: {message}", "error")
+            # Check if it's a filename validation error
+            if "filename format" in message.lower():
+                self._update_status("❌ No files with valid filename format found", "error")
+            else:
+                self._update_status(f"Error: {message}", "error")
             self.batch_progress_label.setText(f"Error: {message}")
         
         # Clean up
@@ -709,7 +946,7 @@ class HabibUniversityApp(QMainWindow):
             self.batch_progress_label.setText(f"❌ Batch processing failed: {message}")
         
         print("\n" + "="*60)
-        print("BATCH PROCESSING SUMMARY")
+        print("📊 BATCH PROCESSING SUMMARY")
         print("="*60)
         print(message)
         
@@ -744,27 +981,44 @@ class HabibUniversityApp(QMainWindow):
             self._update_status("CLO/PLO calculation complete. See terminal output. (Excel append failed)", "warning")
 
     def _print_scores_to_console(self, clo_scores, plo_scores, grades, clo_weights):
-        """Print CLO, PLO, Grades, and CLO weights to terminal."""
-        print("\nCLO Scores:")
+        """Print CLO, PLO, Grades, and CLO weights to terminal with course info."""
+        # Add course information if available
+        if self.current_file_path:
+            try:
+                filename = os.path.basename(self.current_file_path)
+                course_info = extract_course_info(filename)
+                print(f"\n📚 Course: {course_info['display_name']}")
+            except:
+                pass
+        
+        print("\n🎯 CLO Scores:")
         for student, scores in clo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\nPLO Scores:")
+        print("\n📊 PLO Scores:")
         for student, scores in plo_scores.items():
             print(f"{student}: {scores}")
 
-        print("\nFinal Grades:")
+        print("\n🧮 Final Grades:")
         for student, percent in grades.items():
             letter = get_letter_grade(percent)
             print(f"{student}: {percent:.2f}% ({letter})")
 
-        print("\nTotal CLO Weights:")
+        print("\n📌 Total CLO Weights:")
         for clo, weight in clo_weights.items():
             print(f"{clo}: {weight} %")
     
     def _add_batch_result(self, file_name: str, success: bool, message: str):
         """Add a file result to the batch progress display."""
-        result_label = QLabel(f"{file_name}: {message}")
+        # Try to add course info to the display
+        display_text = file_name
+        try:
+            course_info = extract_course_info(file_name)
+            display_text = f"{file_name} ({course_info['full_course_code']} - Section {course_info['section']})"
+        except:
+            pass
+        
+        result_label = QLabel(f"{display_text}: {message}")
         if success:
             result_label.setStyleSheet("color: #28a745; padding: 4px;")
         else:
@@ -786,6 +1040,7 @@ class HabibUniversityApp(QMainWindow):
         """Enable/disable buttons with optional separate control for process button."""
         self.browse_file_btn.setEnabled(enabled)
         self.browse_folder_btn.setEnabled(enabled)
+        self.help_btn.setEnabled(enabled)
         
         if process_enabled is not None:
             self.process_btn.setEnabled(process_enabled)
@@ -799,7 +1054,22 @@ class HabibUniversityApp(QMainWindow):
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Icon.Information)
         msg.setWindowTitle("Processing Complete")
-        msg.setText(f"CLO/PLO results have been successfully appended to your file:\n\n{output_file}\n\nNew sheet added:\n• CLO PLO Results\n\n📧 All student IDs formatted to Habib University email format")
+        
+        # Add course info if available
+        course_text = ""
+        try:
+            filename = os.path.basename(output_file)
+            course_info = extract_course_info(filename)
+            course_text = f"\n📚 Course: {course_info['display_name']}\n"
+        except:
+            pass
+        
+        dialog_text = f"✅ CLO/PLO results have been successfully appended to your file:\n\n📂 {output_file}{course_text}\n"
+        dialog_text += "📋 New sheet added:\n• CLO PLO Results\n\n"
+        dialog_text += "📧 All student IDs formatted to Habib University email format\n"
+        dialog_text += "📊 Results organized by course structure with color-coded performance indicators"
+        
+        msg.setText(dialog_text)
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
     
@@ -812,12 +1082,14 @@ class HabibUniversityApp(QMainWindow):
         successful_count = len([f for f, data in results_summary.items() if data.get('excel_updated', False)])
         total_count = len(results_summary)
         
-        dialog_text = f"Batch processing completed!\n\n"
+        dialog_text = f"🎉 Batch processing completed!\n\n"
         dialog_text += f"✅ Successfully processed: {successful_count}/{total_count} files\n\n"
-        dialog_text += "Each successfully processed file now contains:\n"
+        dialog_text += "📋 Each successfully processed file now contains:\n"
         dialog_text += "• CLO PLO Results sheet with color-coded performance data\n"
-        dialog_text += "• Student IDs formatted to Habib University email format\n\n"
-        dialog_text += "Check the Batch Progress tab and terminal output for detailed results."
+        dialog_text += "• Student IDs formatted to Habib University email format\n"
+        dialog_text += "• Course information extracted from filename\n"
+        dialog_text += "• Results organized by course structure\n\n"
+        dialog_text += "📊 Check the Batch Progress tab and terminal output for detailed results."
         
         msg.setText(dialog_text)
         msg.setDetailedText(summary_message)
@@ -902,7 +1174,7 @@ Please fix the student IDs in your Excel file and try again."""
 def main():
     """Main application entry point."""
     app = QApplication(sys.argv)
-    app.setApplicationName("Habib University CLO/PLO Mapping Tool - Enhanced with ID Validation")
+    app.setApplicationName("Habib University CLO/PLO Mapping Tool - Enhanced with Filename & ID Validation")
     app.setStyle("Fusion")
     
     window = HabibUniversityApp()
